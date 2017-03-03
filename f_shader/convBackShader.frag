@@ -104,7 +104,7 @@ void main()
  pixelMatrix = kernelMatrix[15];
  texA = texA + pixelMatrix[2] * texBL.b + pixelMatrix[1] * texBC.b + pixelMatrix[0] * texBL.b;
 
- convBackTex = vec4(texA*10.0, 1.0);
+ convBackTex = vec4(texA, 1.0);
 }
 
 

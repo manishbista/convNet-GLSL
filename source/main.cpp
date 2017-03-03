@@ -42,25 +42,29 @@ unsigned int convTopFBO, convTopImage;
 unsigned int poolingFBO, poolingImageA, poolingImageB;
 unsigned int poolingTopFBO, poolingTopImage;
 
-unsigned int resizeTopFBO, resizeTopPoolImage, resizeTopGradientImage;
+unsigned int resizeTopFBO, resizeTopPoolImage, resizeTopGradientImage, saveInputTopImageA, saveInputTopImageB;
 unsigned int poolToConvTopFBO, poolToConvTopImage;
 unsigned int convBackTopFBO, convBackTopImageA, convBackTopImageB;
 unsigned int poolToConvFBO, poolToConvImageA, poolToConvImageB;
 unsigned int convBackFBO, convBackImage;
 
-unsigned int resizeFBO, resizePoolImageA, resizePoolImageB, resizeGradientImageA, resizeGradientImageB;
+unsigned int resizeFBO, resizePoolImageA, resizePoolImageB, resizeGradientImageA, resizeGradientImageB, saveInputImage;
+
+
+//saving Convolved outputs for weight matrix updates
 
 int fbStatus;
 
 glm::mat3 kernelMatrix;
-glm::mat3 kernelMatrix_1[18];
-glm::mat3 kernelMatrix_2[18];
+float kernelMatrix_1[18][3][3];
+float kernelMatrix_2[18][3][3];
 float *convPixelBuffer;
 float *labelBuffer;
 float *convGradientBuffer;
 unsigned int gradientTexture;
 
 float testBuffer[14 * 14 * 4];
+float poolToConvTopBuffer[4];
 
 unsigned int createTexture(int w,int h, bool isFloatTex = false);
 unsigned int createTexture(int w, int h, unsigned char *pixels);
@@ -110,6 +114,8 @@ void init()
 
 	resizeTopPoolImage = createTexture(digitSet->getImageWidth()/2.0, digitSet->getImageHeight()/2.0, true);
 	resizeTopGradientImage = createTexture(digitSet->getImageWidth()/2.0, digitSet->getImageHeight()/2.0, true);
+	saveInputTopImageA = createTexture(digitSet->getImageWidth()/2.0, digitSet->getImageHeight()/2.0, true);
+	saveInputTopImageB = createTexture(digitSet->getImageWidth()/2.0, digitSet->getImageHeight()/2.0, true);
 	poolToConvTopImage =  createTexture(digitSet->getImageWidth()/2.0, digitSet->getImageHeight()/2.0, true);
 	convBackTopImageA = createTexture(digitSet->getImageWidth()/2.0, digitSet->getImageHeight()/2.0, true);
 	convBackTopImageB = createTexture(digitSet->getImageWidth()/2.0, digitSet->getImageHeight()/2.0, true);
@@ -118,6 +124,7 @@ void init()
 	resizePoolImageB = createTexture(digitSet->getImageWidth(), digitSet->getImageHeight(), true);
 	resizeGradientImageA = createTexture(digitSet->getImageWidth(), digitSet->getImageHeight(), true);
 	resizeGradientImageB = createTexture(digitSet->getImageWidth(), digitSet->getImageHeight(), true);
+	saveInputImage = createTexture(digitSet->getImageWidth(), digitSet->getImageHeight(), true);
 	
 	poolToConvImageA = createTexture(digitSet->getImageWidth(), digitSet->getImageHeight(), true);
 	poolToConvImageB = createTexture(digitSet->getImageWidth(), digitSet->getImageHeight(), true);
@@ -198,8 +205,10 @@ void init()
 	glBindFramebuffer(GL_FRAMEBUFFER, resizeTopFBO);
 	glFramebufferTexture2D(GL_FRAMEBUFFER,GL_COLOR_ATTACHMENT0,GL_TEXTURE_2D, resizeTopPoolImage,0);
 	glFramebufferTexture2D(GL_FRAMEBUFFER,GL_COLOR_ATTACHMENT1,GL_TEXTURE_2D, resizeTopGradientImage,0);
-	GLenum bufTopMap[2] = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1};
-	glDrawBuffers(2, bufTopMap);
+	glFramebufferTexture2D(GL_FRAMEBUFFER,GL_COLOR_ATTACHMENT2,GL_TEXTURE_2D, saveInputTopImageA,0);
+	glFramebufferTexture2D(GL_FRAMEBUFFER,GL_COLOR_ATTACHMENT3,GL_TEXTURE_2D, saveInputTopImageB,0);
+	GLenum bufTopMap[4] = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1, GL_COLOR_ATTACHMENT2, GL_COLOR_ATTACHMENT3};
+	glDrawBuffers(4, bufTopMap);
 
 	fbStatus = glCheckFramebufferStatus(GL_FRAMEBUFFER);
 	if(fbStatus != GL_FRAMEBUFFER_COMPLETE)
@@ -237,8 +246,9 @@ void init()
 	glFramebufferTexture2D(GL_FRAMEBUFFER,GL_COLOR_ATTACHMENT1,GL_TEXTURE_2D, resizePoolImageB,0);
 	glFramebufferTexture2D(GL_FRAMEBUFFER,GL_COLOR_ATTACHMENT2,GL_TEXTURE_2D, resizeGradientImageA,0);
 	glFramebufferTexture2D(GL_FRAMEBUFFER,GL_COLOR_ATTACHMENT3,GL_TEXTURE_2D, resizeGradientImageB,0);
-	GLenum bufMap[4] = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1, GL_COLOR_ATTACHMENT2, GL_COLOR_ATTACHMENT3};
-	glDrawBuffers(4, bufMap);
+	glFramebufferTexture2D(GL_FRAMEBUFFER,GL_COLOR_ATTACHMENT4,GL_TEXTURE_2D, saveInputImage,0);
+	GLenum bufMap[5] = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1, GL_COLOR_ATTACHMENT2, GL_COLOR_ATTACHMENT3, GL_COLOR_ATTACHMENT4};
+	glDrawBuffers(5, bufMap);
 
 
 	glGenFramebuffers(1, &poolToConvFBO);
@@ -258,8 +268,6 @@ void init()
 	if(fbStatus != GL_FRAMEBUFFER_COMPLETE)
 		std::cout << "Framebuffer is not OK, status=" << fbStatus << std::endl;
 	glBindFramebuffer(GL_FRAMEBUFFER,0);
-
-
 
 	{
 		std::vector<unsigned int> indices;
@@ -333,10 +341,15 @@ void init()
 
 
 	//random initialize kernels
-	for(int itr_k = 0; itr_k < 18; itr_k++)
-		kernelMatrix_1[itr_k] = glm::mat3(0.15);
-	for(int itr_k = 0; itr_k < 18; itr_k++)
-		kernelMatrix_2[itr_k] = glm::mat3(0.05);
+	for(int itr_k = 0; itr_k < 18; itr_k++){
+		kernelMatrix_1[itr_k][0][0] = 0.15;
+		kernelMatrix_1[itr_k][1][1] = 0.15;
+		kernelMatrix_1[itr_k][2][2] = 0.15;
+	//for(int itr_k = 0; itr_k < 18; itr_k++)
+		kernelMatrix_2[itr_k][0][0] = 0.05;
+		kernelMatrix_2[itr_k][1][1] = 0.05;
+		kernelMatrix_2[itr_k][2][2] = 0.05;}
+
 
 
 /*
@@ -403,12 +416,26 @@ void display()
 		
 	labelBuffer[label] = 1.0;
 
+
+	//take input Image: digitTexture and convolve using matrix: kernelMatrix_1 to give output convImageA and convImageB
 	glBindFramebuffer(GL_FRAMEBUFFER,convFBO);
 		convShades->useShader();
 		glClear(GL_COLOR_BUFFER_BIT);
 		glActiveTexture(GL_TEXTURE0);
 		glBindTexture(GL_TEXTURE_2D, digitTexture);
 		glUniform1i(glGetUniformLocation(convShades->getProgramId(),"grayInputImage"),0);
+
+		glActiveTexture(GL_TEXTURE1);
+		glBindTexture(GL_TEXTURE_2D, saveInputImage);
+		glUniform1i(glGetUniformLocation(convShades->getProgramId(),"saveInputImage"),1);
+
+		glActiveTexture(GL_TEXTURE2);
+		glBindTexture(GL_TEXTURE_2D, poolToConvImageA);
+		glUniform1i(glGetUniformLocation(convShades->getProgramId(),"gradientImageA"),2);
+
+		glActiveTexture(GL_TEXTURE3);
+		glBindTexture(GL_TEXTURE_2D, poolToConvImageB);
+		glUniform1i(glGetUniformLocation(convShades->getProgramId(),"gradientImageB"),3);
 		
 		glUniform1f(glGetUniformLocation(convShades->getProgramId(),"TEX_WIDTH"), digitSet->getImageWidth());
 		glUniform1f(glGetUniformLocation(convShades->getProgramId(),"TEX_HEIGHT"), digitSet->getImageHeight());
@@ -428,7 +455,9 @@ void display()
 	glBindFramebuffer(GL_FRAMEBUFFER,0);
 
 
-
+	//convImageA and convImageB are maxPooled to obtain poolingImageA and poolingImageB
+	//convImageA and convImageB are of size texWidth * texHeight
+	//poolingImageA and poolingImageB are of size texWidth/2 and texHeight/2
 	glBindFramebuffer(GL_FRAMEBUFFER,poolingFBO);
 		poolingShades->useShader();
 		glClear(GL_COLOR_BUFFER_BIT);
@@ -455,6 +484,8 @@ void display()
 	 glBindFramebuffer(GL_FRAMEBUFFER,0);
 
 
+	//take pooled images and perform convolution to give single convolved output image convTopImage
+	//convTopImage is of size texWidth/2 X texHeight/2
 	glBindFramebuffer(GL_FRAMEBUFFER,convTopFBO);
 		convTopShades->useShader();
 		glClear(GL_COLOR_BUFFER_BIT);
@@ -465,6 +496,19 @@ void display()
 		glActiveTexture(GL_TEXTURE1);
 		glBindTexture(GL_TEXTURE_2D, poolingImageB);
 		glUniform1i(glGetUniformLocation(convTopShades->getProgramId(),"secondInputImage"),1);
+
+		glActiveTexture(GL_TEXTURE2);
+		glBindTexture(GL_TEXTURE_2D, saveInputTopImageA);
+		glUniform1i(glGetUniformLocation(convTopShades->getProgramId(),"saveInputImageA"),2);
+
+		glActiveTexture(GL_TEXTURE3);
+		glBindTexture(GL_TEXTURE_2D, saveInputTopImageB);
+		glUniform1i(glGetUniformLocation(convTopShades->getProgramId(),"saveInputImageB"),3);
+
+		glActiveTexture(GL_TEXTURE4);
+		glBindTexture(GL_TEXTURE_2D, poolToConvTopImage);
+		glUniform1i(glGetUniformLocation(convTopShades->getProgramId(),"gradientImage"),4);
+		
 
 		//inputTextureSize 60% sure
 		glUniform1f(glGetUniformLocation(convTopShades->getProgramId(),"TEX_WIDTH"), digitSet->getImageWidth()/2.0);
@@ -482,6 +526,9 @@ void display()
 		glBindTexture(GL_TEXTURE_2D, 0);		
 		convTopShades->delShader();
 	glBindFramebuffer(GL_FRAMEBUFFER,0);
+	
+	//take convolved Image and maxPool to obtain texture of size texWidth/4 X texHeight/4
+	//output Image is poolingTopImage
 	
 	glBindFramebuffer(GL_FRAMEBUFFER,poolingTopFBO);
 	poolingTopShades->useShader();
@@ -505,7 +552,8 @@ void display()
 	glBindFramebuffer(GL_FRAMEBUFFER,0);
 
 
-	//extract 7X7 pixel values from poolingTopImage Texture
+	//end of forward Pass, the resulting image pixels is of size width*height*channel = 7*7*3
+	//extract 7X7X3 pixel values from poolingTopImage Texture
 	glBindFramebuffer(GL_FRAMEBUFFER, poolingTopFBO);
 	glReadBuffer(GL_COLOR_ATTACHMENT0);
 	glReadPixels(0, 0, digitSet->getImageWidth()/4, digitSet->getImageHeight()/4, GL_RGB, GL_FLOAT, convPixelBuffer);		//123
@@ -513,7 +561,9 @@ void display()
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
 
-
+	//feed input data contained in convPixel Buffer to Fully Connected Layer
+	//the size and/or graph of FCC layer can be changed through mlpObject
+	//labelBuffer is initilally assigned to 1.0 and then reset to 0.0 for making room for next feed forward operation
 	mlpObject->learnFromMLP(0.85, label, imageID);
 	 labelBuffer[label] = 0.0;
 	
@@ -525,8 +575,16 @@ void display()
 		std::cout<<" "<<it<<" "<<convGradientBuffer[3*it+0]<<"  "<<convGradientBuffer[3*it+1]<<"  "<<convGradientBuffer[3*it+2];
 	}
 */
+
+
+	//after gradient update has been performed, save the gradient values into a texture
 	updateTextureContent(gradientTexture, digitSet->getImageWidth()/4, digitSet->getImageHeight()/4, convGradientBuffer);
 
+	
+	//gradient value is of size texWidth/4 X texHeight/4
+	//change the texture widtht to size texWidth/2 X texHeight/2
+	//also save convTopImage as savedConvTopImage
+	//savedConvTopImage is used as input to latter feedforward process for gradient updating
 	
 	glBindFramebuffer(GL_FRAMEBUFFER, resizeTopFBO);
 	resizeTopShades->useShader();
@@ -539,6 +597,14 @@ void display()
 		glBindTexture(GL_TEXTURE_2D, gradientTexture);
 		glUniform1i(glGetUniformLocation(resizeTopShades->getProgramId(),"gradImage"),1);
 
+		glActiveTexture(GL_TEXTURE2);
+		glBindTexture(GL_TEXTURE_2D, poolingImageA);
+		glUniform1i(glGetUniformLocation(resizeTopShades->getProgramId(),"inputImageA"),2);
+
+		glActiveTexture(GL_TEXTURE3);
+		glBindTexture(GL_TEXTURE_2D, poolingImageB);
+		glUniform1i(glGetUniformLocation(resizeTopShades->getProgramId(),"inputImageB"),3);
+
 		glUniform1f(glGetUniformLocation(resizeTopShades->getProgramId(),"TEX_WIDTH"), digitSet->getImageWidth()/2.0);
 		glUniform1f(glGetUniformLocation(resizeTopShades->getProgramId(),"TEX_HEIGHT"), digitSet->getImageHeight()/2.0);
 		
@@ -547,6 +613,8 @@ void display()
 
 		glBindFragDataLocation(resizeTopShades->getProgramId(), 0, "poolTex");
 		glBindFragDataLocation(resizeTopShades->getProgramId(), 1, "gradTex");
+		glBindFragDataLocation(resizeTopShades->getProgramId(), 2, "saveInputTopImageA");
+		glBindFragDataLocation(resizeTopShades->getProgramId(), 2, "saveInputTopImageB");
 
 	pipeline.updateMatrices(resizeTopShades->getProgramId());
 	quad->draw(resizeTopShades->getProgramId());
@@ -569,7 +637,10 @@ void display()
 	}
 */
 
-	
+
+	//resized Image fits the size to that of convolved Output Image
+	//this layer backprops the image in terms of pooling Layer and Rectified Linear Unit
+	//output is an image of gradient values
 	glBindFramebuffer(GL_FRAMEBUFFER, poolToConvTopFBO);
 	poolToConvTopShades->useShader();
 	glClear(GL_COLOR_BUFFER_BIT);
@@ -599,6 +670,9 @@ void display()
 	glBindFramebuffer(GL_FRAMEBUFFER,0);
 
 
+	//use gradient values to backprop through convolution layer: Input is gradient Image
+	//output value is gradient value for convolved Image
+
 	glBindFramebuffer(GL_FRAMEBUFFER, convBackTopFBO);
 	convBackTopShades->useShader();
 	glClear(GL_COLOR_BUFFER_BIT);
@@ -623,6 +697,7 @@ void display()
 
 
 	//resize gradient image and pooling image to match texWidth and texHeight
+	//also save convolution output values of Layer: convImageA and convImageB
 	glBindFramebuffer(GL_FRAMEBUFFER, resizeFBO);
 	resizeShades->useShader();
 	glClear(GL_COLOR_BUFFER_BIT);
@@ -642,6 +717,9 @@ void display()
 		glBindTexture(GL_TEXTURE_2D, convBackTopImageB);
 		glUniform1i(glGetUniformLocation(resizeShades->getProgramId(),"gradImageB"),3);
 
+		glActiveTexture(GL_TEXTURE4);
+		glBindTexture(GL_TEXTURE_2D, digitTexture);
+		glUniform1i(glGetUniformLocation(resizeShades->getProgramId(),"inputImage"),4);
 
 		glUniform1f(glGetUniformLocation(resizeShades->getProgramId(),"TEX_WIDTH"), digitSet->getImageWidth());
 		glUniform1f(glGetUniformLocation(resizeShades->getProgramId(),"TEX_HEIGHT"), digitSet->getImageHeight());
@@ -653,6 +731,7 @@ void display()
 		glBindFragDataLocation(resizeShades->getProgramId(), 1, "poolTexB");
 		glBindFragDataLocation(resizeShades->getProgramId(), 2, "gradTexA");
 		glBindFragDataLocation(resizeShades->getProgramId(), 3, "gradTexB");
+		glBindFragDataLocation(resizeShades->getProgramId(), 4, "saveInputImage");
 
 	pipeline.updateMatrices(resizeShades->getProgramId());
 	quad->draw(resizeShades->getProgramId());
@@ -660,6 +739,7 @@ void display()
 	glBindFramebuffer(GL_FRAMEBUFFER,0);
 
 
+	//take resized image and backprop through pooling layers
 	glBindFramebuffer(GL_FRAMEBUFFER, poolToConvFBO);
 	poolToConvShades->useShader();
 	glClear(GL_COLOR_BUFFER_BIT);
@@ -702,6 +782,7 @@ void display()
 	glBindFramebuffer(GL_FRAMEBUFFER,0);
 
 
+	//take gradient Image and backprop to obtain error gradients of Convolution Layer
 	glBindFramebuffer(GL_FRAMEBUFFER, convBackFBO);
 	convBackShades->useShader();
 	glClear(GL_COLOR_BUFFER_BIT);
@@ -727,6 +808,23 @@ void display()
 	convBackShades->delShader();
 	glBindFramebuffer(GL_FRAMEBUFFER,0);
 
+/*
+	//read gradient values to update params
+	glBindFramebuffer(GL_FRAMEBUFFER, poolToConvTopFBO);
+	glReadBuffer(GL_COLOR_ATTACHMENT0);
+	glReadPixels(0, 0, digitSet->getImageWidth()/2, digitSet->getImageHeight()/2, GL_RGBA, GL_FLOAT, testBuffer);		//123
+	glReadBuffer(GL_BACK);
+	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+	std::cout<<std::endl<<" after "<<std::endl;
+
+	for(int it = 0; it < digitSet->getImageWidth()/2 * digitSet->getImageHeight()/2; it++)
+	{
+		std::cout<<std::endl;
+		std::cout<<" "<<it<<" "<<testBuffer[4*it+0]<<"  "<<testBuffer[4*it+1]<<"  "<<testBuffer[4*it+2]<<"  "<<testBuffer[4*it+3];
+	}
+*/
+
 	displayEnd = std::clock();
 	std::cout<<std::endl<<" time taken "<<( displayEnd - displayStart ) / (double) CLOCKS_PER_SEC<<std::endl;
 
@@ -740,7 +838,7 @@ void display()
 	displayShades->useShader();
 	glClear(GL_COLOR_BUFFER_BIT);
 		glActiveTexture(GL_TEXTURE0);
-		glBindTexture(GL_TEXTURE_2D, convBackImage);
+		glBindTexture(GL_TEXTURE_2D, saveInputTopImageB);
 		glUniform1i(glGetUniformLocation(displayShades->getProgramId(),"texture0"),0);
 	pipeline.updateMatrices(displayShades->getProgramId());
 	quadInverted->draw(displayShades->getProgramId());

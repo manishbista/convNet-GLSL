@@ -1,12 +1,19 @@
 #version 130
 
 uniform sampler2D grayInputImage;
+uniform sampler2D saveInputImage;
+uniform sampler2D gradientImageA;
+uniform sampler2D gradientImageB;
 uniform mat3 kernelMatrix[18];
 
 varying float leftTex, rightTex, topTex, bottomTex, centerXTex, centerYTex;
 vec3 colorValueBL, colorValueBC, colorValueBR, colorValueML, colorValueMC, colorValueMR, colorValueTL, colorValueTC, colorValueTR;
+vec3 colorValueSBL, colorValueSBC, colorValueSBR, colorValueSML, colorValueSMC, colorValueSMR, colorValueSTL, colorValueSTC, colorValueSTR;
 vec4 outputColorValue;
 mat3 pixelMatrix;
+vec4 gradTextureA, gradTextureB;
+vec3 pixelVector;
+
 
 out vec4 texA;
 out vec4 texB;
@@ -28,32 +35,49 @@ void main()
  colorValueTC = texture2D(grayInputImage, vec2(centerXTex, topTex)).rgb;
  colorValueTR = texture2D(grayInputImage, vec2(rightTex, topTex)).rgb;
 
+ gradTextureA = texture2D(gradientImageA, vec2(centerXTex, centerYTex));
+ gradTextureB = texture2D(gradientImageB, vec2(centerXTex, centerYTex));
+
+ colorValueSBL = texture2D(saveInputImage, vec2(leftTex, bottomTex)).rgb;
+ colorValueSBC = texture2D(saveInputImage, vec2(centerXTex, bottomTex)).rgb;
+ colorValueSBR = texture2D(saveInputImage, vec2(rightTex, bottomTex)).rgb;
+
+ colorValueSML = texture2D(saveInputImage, vec2(leftTex, centerYTex)).rgb;
+ colorValueSMC = texture2D(saveInputImage, vec2(centerXTex, centerYTex)).rgb;
+ colorValueSMR = texture2D(saveInputImage, vec2(rightTex, centerYTex)).rgb;
+
+ colorValueSTL = texture2D(saveInputImage, vec2(leftTex, topTex)).rgb;
+ colorValueSTC = texture2D(saveInputImage, vec2(centerXTex, topTex)).rgb;
+ colorValueSTR = texture2D(saveInputImage, vec2(rightTex, topTex)).rgb;
+
 //first depth slice
  pixelMatrix = kernelMatrix[0];
- outputColorValue.x = dot(pixelMatrix[0], colorValueTL) + dot(pixelMatrix[1], colorValueTC) + dot(pixelMatrix[2], colorValueTR);
+ pixelVector = pixelMatrix[0] * colorValueTL + pixelMatrix[1] * colorValueTC + pixelMatrix[2] * colorValueTR;
+ outputColorValue.x = dot(pixelVector, vec3(1.0)); 
 
  pixelMatrix = kernelMatrix[1];
- outputColorValue.x = outputColorValue.x + 
- 						dot(pixelMatrix[0], colorValueML) + dot(pixelMatrix[1], colorValueMC) + dot(pixelMatrix[2], colorValueMR);
+ pixelVector = pixelMatrix[0] * colorValueML + pixelMatrix[1] * colorValueMC + pixelMatrix[2] * colorValueMR;
+ outputColorValue.x = outputColorValue.x + dot(pixelVector, vec3(1.0));
 
  pixelMatrix = kernelMatrix[2];
- outputColorValue.x = outputColorValue.x + 
- 						dot(pixelMatrix[0], colorValueBL) + dot(pixelMatrix[1], colorValueBC) + dot(pixelMatrix[2], colorValueBR);
+ pixelVector = pixelMatrix[0] * colorValueBL + pixelMatrix[1] * colorValueBC + pixelMatrix[2] * colorValueBR;
+ outputColorValue.x = outputColorValue.x + dot(pixelVector, vec3(1.0));
  
  outputColorValue.x = max(0.0, outputColorValue.x);
 
 //second slice
 
  pixelMatrix = kernelMatrix[3];
- outputColorValue.y = dot(pixelMatrix[0], colorValueTL) + dot(pixelMatrix[1], colorValueTC) + dot(pixelMatrix[2], colorValueTR);
+ pixelVector = pixelMatrix[0] * colorValueTL + pixelMatrix[1] * colorValueTC + pixelMatrix[2] * colorValueTR;
+ outputColorValue.y = dot(pixelVector, vec3(1.0)); 
 
  pixelMatrix = kernelMatrix[4];
- outputColorValue.y = outputColorValue.y + 
- 						dot(pixelMatrix[0], colorValueML) + dot(pixelMatrix[1], colorValueMC) + dot(pixelMatrix[2], colorValueMR);
+ pixelVector = pixelMatrix[0] * colorValueML + pixelMatrix[1] * colorValueMC + pixelMatrix[2] * colorValueMR;
+ outputColorValue.y = outputColorValue.y + dot(pixelVector, vec3(1.0));
 
  pixelMatrix = kernelMatrix[5];
- outputColorValue.y = outputColorValue.y + 
- 						dot(pixelMatrix[0], colorValueBL) + dot(pixelMatrix[1], colorValueBC) + dot(pixelMatrix[2], colorValueBR);
+ pixelVector = pixelMatrix[0] * colorValueBL + pixelMatrix[1] * colorValueBC + pixelMatrix[2] * colorValueBR;
+ outputColorValue.y = outputColorValue.y + dot(pixelVector, vec3(1.0));
  
  outputColorValue.y = max(0.0, outputColorValue.y);
 
@@ -61,15 +85,16 @@ void main()
 //third slice
 
  pixelMatrix = kernelMatrix[6];
- outputColorValue.z = dot(pixelMatrix[0], colorValueTL) + dot(pixelMatrix[1], colorValueTC) + dot(pixelMatrix[2], colorValueTR);
+ pixelVector = pixelMatrix[0] * colorValueTL + pixelMatrix[1] * colorValueTC + pixelMatrix[2] * colorValueTR;
+ outputColorValue.z = dot(pixelVector, vec3(1.0)); 
 
  pixelMatrix = kernelMatrix[7];
- outputColorValue.z = outputColorValue.z + 
- 						dot(pixelMatrix[0], colorValueML) + dot(pixelMatrix[1], colorValueMC) + dot(pixelMatrix[2], colorValueMR);
+ pixelVector = pixelMatrix[0] * colorValueML + pixelMatrix[1] * colorValueMC + pixelMatrix[2] * colorValueMR;
+ outputColorValue.z = outputColorValue.z + dot(pixelVector, vec3(1.0));
 
  pixelMatrix = kernelMatrix[8];
- outputColorValue.z = outputColorValue.z + 
- 						dot(pixelMatrix[0], colorValueBL) + dot(pixelMatrix[1], colorValueBC) + dot(pixelMatrix[2], colorValueBR);
+ pixelVector = pixelMatrix[0] * colorValueBL + pixelMatrix[1] * colorValueBC + pixelMatrix[2] * colorValueBR;
+ outputColorValue.z = outputColorValue.z + dot(pixelVector, vec3(1.0));
  
  outputColorValue.z = max(0.0, outputColorValue.z);
 
@@ -80,30 +105,32 @@ void main()
 
 //fourth depth slice
  pixelMatrix = kernelMatrix[9];
- outputColorValue.x = dot(pixelMatrix[0], colorValueTL) + dot(pixelMatrix[1], colorValueTC) + dot(pixelMatrix[2], colorValueTR);
+ pixelVector = pixelMatrix[0] * colorValueTL + pixelMatrix[1] * colorValueTC + pixelMatrix[2] * colorValueTR;
+ outputColorValue.x = dot(pixelVector, vec3(1.0)); 
 
  pixelMatrix = kernelMatrix[10];
- outputColorValue.x = outputColorValue.x + 
- 						dot(pixelMatrix[0], colorValueML) + dot(pixelMatrix[1], colorValueMC) + dot(pixelMatrix[2], colorValueMR);
+ pixelVector = pixelMatrix[0] * colorValueML + pixelMatrix[1] * colorValueMC + pixelMatrix[2] * colorValueMR;
+ outputColorValue.x = outputColorValue.x + dot(pixelVector, vec3(1.0));
 
  pixelMatrix = kernelMatrix[11];
- outputColorValue.x = outputColorValue.x + 
- 						dot(pixelMatrix[0], colorValueBL) + dot(pixelMatrix[1], colorValueBC) + dot(pixelMatrix[2], colorValueBR);
+ pixelVector = pixelMatrix[0] * colorValueBL + pixelMatrix[1] * colorValueBC + pixelMatrix[2] * colorValueBR;
+ outputColorValue.x = outputColorValue.x + dot(pixelVector, vec3(1.0));
  
  outputColorValue.x = max(0.0, outputColorValue.x);
 
 
 //fifth slice
  pixelMatrix = kernelMatrix[12];
- outputColorValue.y = dot(pixelMatrix[0], colorValueTL) + dot(pixelMatrix[1], colorValueTC) + dot(pixelMatrix[2], colorValueTR);
+ pixelVector = pixelMatrix[0] * colorValueTL + pixelMatrix[1] * colorValueTC + pixelMatrix[2] * colorValueTR;
+ outputColorValue.y = dot(pixelVector, vec3(1.0)); 
 
  pixelMatrix = kernelMatrix[13];
- outputColorValue.y = outputColorValue.y + 
- 						dot(pixelMatrix[0], colorValueML) + dot(pixelMatrix[1], colorValueMC) + dot(pixelMatrix[2], colorValueMR);
+ pixelVector = pixelMatrix[0] * colorValueML + pixelMatrix[1] * colorValueMC + pixelMatrix[2] * colorValueMR;
+ outputColorValue.y = outputColorValue.y + dot(pixelVector, vec3(1.0));
 
  pixelMatrix = kernelMatrix[14];
- outputColorValue.y = outputColorValue.y + 
- 						dot(pixelMatrix[0], colorValueBL) + dot(pixelMatrix[1], colorValueBC) + dot(pixelMatrix[2], colorValueBR);
+ pixelVector = pixelMatrix[0] * colorValueBL + pixelMatrix[1] * colorValueBC + pixelMatrix[2] * colorValueBR;
+ outputColorValue.y = outputColorValue.y + dot(pixelVector, vec3(1.0));
  
  outputColorValue.y = max(0.0, outputColorValue.y);
 
@@ -111,15 +138,16 @@ void main()
 //sixth slice
 
  pixelMatrix = kernelMatrix[15];
- outputColorValue.z = dot(pixelMatrix[0], colorValueTL) + dot(pixelMatrix[1], colorValueTC) + dot(pixelMatrix[2], colorValueTR);
+ pixelVector = pixelMatrix[0] * colorValueTL + pixelMatrix[1] * colorValueTC + pixelMatrix[2] * colorValueTR;
+ outputColorValue.z = dot(pixelVector, vec3(1.0)); 
 
  pixelMatrix = kernelMatrix[16];
- outputColorValue.z = outputColorValue.z + 
- 						dot(pixelMatrix[0], colorValueML) + dot(pixelMatrix[1], colorValueMC) + dot(pixelMatrix[2], colorValueMR);
+ pixelVector = pixelMatrix[0] * colorValueML + pixelMatrix[1] * colorValueMC + pixelMatrix[2] * colorValueMR;
+ outputColorValue.z = outputColorValue.z + dot(pixelVector, vec3(1.0));
 
  pixelMatrix = kernelMatrix[17];
- outputColorValue.z = outputColorValue.z + 
- 						dot(pixelMatrix[0], colorValueBL) + dot(pixelMatrix[1], colorValueBC) + dot(pixelMatrix[2], colorValueBR);
+ pixelVector = pixelMatrix[0] * colorValueBL + pixelMatrix[1] * colorValueBC + pixelMatrix[2] * colorValueBR;
+ outputColorValue.z = outputColorValue.z + dot(pixelVector, vec3(1.0));
  
  outputColorValue.z = max(0.0, outputColorValue.z);
 
