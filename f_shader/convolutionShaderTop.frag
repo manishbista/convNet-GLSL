@@ -2,8 +2,6 @@
 
 uniform sampler2D firstInputImage;
 uniform sampler2D secondInputImage;
-uniform sampler2D saveInputImageA;
-uniform sampler2D saveInputImageB;
 uniform sampler2D gradientImage;
 uniform mat3 kernelMatrix[18];
 
@@ -13,10 +11,8 @@ vec4 outputColorValue;
 mat3 pixelMatrix;
 vec4 gradTexture;
 vec3 pixelVector;
-//color values of saved Texture Image which is of previous iteration, used for updating weights
-vec3 colorValueSBL, colorValueSBC, colorValueSBR, colorValueSML, colorValueSMC, colorValueSMR, colorValueSTL, colorValueSTC, colorValueSTR;
 
-out vec4 texA;
+out vec4 convTopImage;
 
 
 void main()
@@ -37,18 +33,6 @@ void main()
  colorValueTR = texture2D(firstInputImage, vec2(rightTex, topTex)).rgb;
 
  gradTexture = texture2D(gradientImage, vec2(centerXTex, centerYTex));
-
- colorValueSBL = texture2D(saveInputImageA, vec2(leftTex, bottomTex)).rgb;
- colorValueSBC = texture2D(saveInputImageA, vec2(centerXTex, bottomTex)).rgb;
- colorValueSBR = texture2D(saveInputImageA, vec2(rightTex, bottomTex)).rgb;
-
- colorValueSML = texture2D(saveInputImageA, vec2(leftTex, centerYTex)).rgb;
- colorValueSMC = texture2D(saveInputImageA, vec2(centerXTex, centerYTex)).rgb;
- colorValueSMR = texture2D(saveInputImageA, vec2(rightTex, centerYTex)).rgb;
-
- colorValueSTL = texture2D(saveInputImageA, vec2(leftTex, topTex)).rgb;
- colorValueSTC = texture2D(saveInputImageA, vec2(centerXTex, topTex)).rgb;
- colorValueSTR = texture2D(saveInputImageA, vec2(rightTex, topTex)).rgb;
 
 //first depth slice
  pixelMatrix = kernelMatrix[0];
@@ -104,18 +88,6 @@ void main()
  colorValueTC = texture2D(secondInputImage, vec2(centerXTex, topTex)).rgb;
  colorValueTR = texture2D(secondInputImage, vec2(rightTex, topTex)).rgb;
 
- colorValueSBL = texture2D(saveInputImageB, vec2(leftTex, bottomTex)).rgb;
- colorValueSBC = texture2D(saveInputImageB, vec2(centerXTex, bottomTex)).rgb;
- colorValueSBR = texture2D(saveInputImageB, vec2(rightTex, bottomTex)).rgb;
-
- colorValueSML = texture2D(saveInputImageB, vec2(leftTex, centerYTex)).rgb;
- colorValueSMC = texture2D(saveInputImageB, vec2(centerXTex, centerYTex)).rgb;
- colorValueSMR = texture2D(saveInputImageB, vec2(rightTex, centerYTex)).rgb;
-
- colorValueSTL = texture2D(saveInputImageB, vec2(leftTex, topTex)).rgb;
- colorValueSTC = texture2D(saveInputImageB, vec2(centerXTex, topTex)).rgb;
- colorValueSTR = texture2D(saveInputImageB, vec2(rightTex, topTex)).rgb;
-
 //first depth slice
  pixelMatrix = kernelMatrix[9];
  pixelVector = pixelMatrix[0] * colorValueTL + pixelMatrix[1] * colorValueTC + pixelMatrix[2] * colorValueTR;
@@ -165,7 +137,7 @@ void main()
  outputColorValue.z = max(0.0, outputColorValue.z);
 
 //save values
- texA = vec4(outputColorValue.x, outputColorValue.y ,outputColorValue.z, 1.0);
+ convTopImage = vec4(outputColorValue.x, outputColorValue.y ,outputColorValue.z, 1.0);
 
 }
 

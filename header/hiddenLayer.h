@@ -14,7 +14,7 @@ class hiddenLayer{
 	bool isHiddenLayer;
 
  public:
-	hiddenLayer(unsigned int, unsigned int, float*, float*, bool isSigmoid = true);
+	hiddenLayer(unsigned int numCell_prev, unsigned int numCell_cur, float** weight, float* biasWeight, float* inputVal, float* outputVal, bool isSigmoid = true);
 	~hiddenLayer();
 	void forwardPassLayer();
 	void backwardPassLayer(float*, float*);

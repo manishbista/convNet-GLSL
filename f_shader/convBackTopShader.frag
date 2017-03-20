@@ -1,6 +1,7 @@
 #version 130
-
-uniform sampler2D inputImage;
+uniform sampler2D gradientImage;
+uniform sampler2D saveInputTopImageA;
+uniform sampler2D saveInputTopImageB;
 uniform mat3 kernelMatrix[18];
 varying float leftTex, rightTex, topTex, bottomTex, centerXTex, centerYTex;
 
@@ -10,6 +11,8 @@ vec3 texB;
 
 out vec4 convBackTexA;
 out vec4 convBackTexB;
+out vec4 sumTopImageA;
+out vec4 sumTopImageB;
 
 
 mat3 pixelMatrix;
@@ -17,17 +20,17 @@ mat3 pixelMatrix;
 void main()
 {
 
- texBL = texture2D(inputImage, vec2(leftTex, bottomTex)).rgb;
- texBC = texture2D(inputImage, vec2(centerXTex, bottomTex)).rgb;
- texBR = texture2D(inputImage, vec2(rightTex, bottomTex)).rgb;
+ texBL = texture2D(gradientImage, vec2(leftTex, bottomTex)).rgb;
+ texBC = texture2D(gradientImage, vec2(centerXTex, bottomTex)).rgb;
+ texBR = texture2D(gradientImage, vec2(rightTex, bottomTex)).rgb;
 
- texML = texture2D(inputImage, vec2(leftTex, centerYTex)).rgb;
- texMC = texture2D(inputImage, vec2(centerXTex, centerYTex)).rgb;
- texMR = texture2D(inputImage, vec2(rightTex, centerYTex)).rgb;
+ texML = texture2D(gradientImage, vec2(leftTex, centerYTex)).rgb;
+ texMC = texture2D(gradientImage, vec2(centerXTex, centerYTex)).rgb;
+ texMR = texture2D(gradientImage, vec2(rightTex, centerYTex)).rgb;
 
- texTL = texture2D(inputImage, vec2(leftTex, topTex)).rgb;
- texTC = texture2D(inputImage, vec2(centerXTex, topTex)).rgb;
- texTR = texture2D(inputImage, vec2(rightTex, topTex)).rgb;
+ texTL = texture2D(gradientImage, vec2(leftTex, topTex)).rgb;
+ texTC = texture2D(gradientImage, vec2(centerXTex, topTex)).rgb;
+ texTR = texture2D(gradientImage, vec2(rightTex, topTex)).rgb;
 
 
 //first depth slice
@@ -98,6 +101,9 @@ void main()
 
  convBackTexA = vec4(texA, 1.0);
  convBackTexB = vec4(texB, 1.0);
+
+ sumTopImageA = texture2D(saveInputTopImageA, vec2(centerXTex, centerYTex));
+ sumTopImageB = texture2D(saveInputTopImageB, vec2(centerXTex, centerYTex));
 }
 
 

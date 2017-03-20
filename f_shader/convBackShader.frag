@@ -2,6 +2,7 @@
 
 uniform sampler2D firstInputImage;
 uniform sampler2D secondInputImage;
+uniform sampler2D saveInputImage;
 uniform mat3 kernelMatrix[18];
 varying float leftTex, rightTex, topTex, bottomTex, centerXTex, centerYTex;
 
@@ -9,7 +10,7 @@ vec3 texBL, texBC, texBR, texML, texMC, texMR, texTL, texTC, texTR;
 vec3 texA;
 
 out vec4 convBackTex;
-
+out vec4 sumImage;
 
 mat3 pixelMatrix;
 
@@ -105,6 +106,8 @@ void main()
  texA = texA + pixelMatrix[2] * texBL.b + pixelMatrix[1] * texBC.b + pixelMatrix[0] * texBL.b;
 
  convBackTex = vec4(texA, 1.0);
+
+ sumImage = texture2D(saveInputImage, vec2(centerXTex, centerYTex));
 }
 
 

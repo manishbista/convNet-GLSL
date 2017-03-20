@@ -14,14 +14,16 @@ private:
 	hiddenLayer** hiddenLayerObj;					//array of pointers to hidden Layers
 	float** errGradient;
 	float* labelPtr;
+	float*** weights;
+	float** biasWeights; 
 
 public:
 	mlp(int numIn, int numHid, int numOut, int nCells);
 	float* getPtrToInput() {return ioValues[0];}
 	float* getPtrToInputGradient() { return errGradient[0]; } 
 	float* getPtrToLabel() {return labelPtr;}
-	bool learnFromMLP(float thresholdValue, int label, int imageID);
-	void testMLP();
+	float learnFromMLP(float thresholdValue, int label, int imageID);
+	int testMLP();
 	~mlp();
 
 

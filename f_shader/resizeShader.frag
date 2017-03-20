@@ -4,6 +4,7 @@ uniform sampler2D poolImageA;
 uniform sampler2D poolImageB;
 uniform sampler2D gradImageA;
 uniform sampler2D gradImageB;
+uniform sampler2D sumInputImage;
 uniform sampler2D inputImage;
 
 varying vec2 outUV;
@@ -22,6 +23,6 @@ void main()
  poolTexB = texture2D(poolImageB, outUV);
  gradTexA = texture2D(gradImageA, outUV);
  gradTexB = texture2D(gradImageB, outUV);
- saveInputImage = texture2D(inputImage, outUV);
+ saveInputImage = vec4((texture2D(sumInputImage, outUV)).rgb + (texture2D(inputImage, outUV)).rgb, 1.0);
 
 }

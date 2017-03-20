@@ -6,66 +6,48 @@
 #include <iostream>
 #include "../header/mnist.h"
 #include "../header/mlp.h"
-#include <ctime>
-
+#include <time.h>
+#include <fstream>
 
 using namespace std;
 
+//screen width and height init
 float SCREEN_WIDTH = 640.0;
 float SCREEN_HEIGHT = 480.0;
+//SDL init
 SDL_Window* gWindow;
 SDL_Surface* gScreenSurface;
+//matrix operations
 matrices pipeline;
+//scene: can be used to display images or objects
 meshLoader* scene;
+//mesh to attach images to and render
 mesh* quad;
 mesh* quadInverted;
 
-shader* convTopShades;
-shader* convShades;
-shader* poolingTopShades;
-shader* poolingShades;
-shader* resizeTopShades;
-shader* displayShades;
-shader* poolToConvTopShades;
-shader* convBackTopShades;
-shader* poolToConvShades;
-shader* resizeShades;
-shader* convBackShades;
-
+//MNIST Object
 idxFileReader* digitSet;
 unsigned char* digitImage;
 unsigned int digitTexture;
 
+
+//Shaders
+shader* displayShades;						//to display Textures the way it is
+shader* convolutionFirstShades;					//first convolution + ReLU operation
+
+//frameBuffers and their render targets
 unsigned int colorFBO, colorImage;
-unsigned int convFBO, convImageA, convImageB;
-unsigned int convTopFBO, convTopImage;
-unsigned int poolingFBO, poolingImageA, poolingImageB;
-unsigned int poolingTopFBO, poolingTopImage;
-
-unsigned int resizeTopFBO, resizeTopPoolImage, resizeTopGradientImage, saveInputTopImageA, saveInputTopImageB;
-unsigned int poolToConvTopFBO, poolToConvTopImage;
-unsigned int convBackTopFBO, convBackTopImageA, convBackTopImageB;
-unsigned int poolToConvFBO, poolToConvImageA, poolToConvImageB;
-unsigned int convBackFBO, convBackImage;
-
-unsigned int resizeFBO, resizePoolImageA, resizePoolImageB, resizeGradientImageA, resizeGradientImageB, saveInputImage;
+unsigned int convolutionFirstFBO, convolutionFirstImage;
 
 
-//saving Convolved outputs for weight matrix updates
-
-int fbStatus;
-
-glm::mat3 kernelMatrix;
-float kernelMatrix_1[18][3][3];
-float kernelMatrix_2[18][3][3];
+//buffer pointer to save output of convolution layer to pass it to FCL 
 float *convPixelBuffer;
 float *labelBuffer;
+//buffer pointer to save delta errors received from FCL
 float *convGradientBuffer;
 unsigned int gradientTexture;
 
-float testBuffer[14 * 14 * 4];
-float poolToConvTopBuffer[4];
-
+//create openGL Texture or update its contents
 unsigned int createTexture(int w,int h, bool isFloatTex = false);
 unsigned int createTexture(int w, int h, unsigned char *pixels);
 unsigned int createTexture(int w, int h, float *pixels);
@@ -74,75 +56,61 @@ void updateTextureContent(unsigned int textureId, int w, int h, float* pixels);
 unsigned int createRGBTexture(int w, int h);
 
 
+//dummy variable to check frameBuffer Status
+int fbStatus;
+
+//variables to keep track of image
 int imgCount;
 int imageID = 0;
 int label;
 int prevImageID = -1;
 
+//Instance of Mulitple Layer Perceptron : FCL
 mlp* mlpObject;
+
+//kernel Matrix for convolution Operation
+float kernelFirstMatrix[9][3][3];
+
+//initialization function
 void init()
 {
+	//set up world co-ordinate
 	pipeline.matrixMode(PROJECTION_MATRIX);
 	pipeline.loadIdentity();
 	pipeline.ortho(-1.0, 1.0, -1.0, 1.0, 1, 100);
-	convTopShades = new shader("../v_shader/convolutionShaderTop.vs","../f_shader/convolutionShaderTop.frag");
-	convShades = new shader("../v_shader/convolutionShader.vs","../f_shader/convolutionShader.frag");
-	poolingTopShades = new shader("../v_shader/poolingShaderTop.vs","../f_shader/poolingShaderTop.frag");
-	poolingShades = new shader("../v_shader/poolingShader.vs","../f_shader/poolingShader.frag");
-	resizeTopShades = new shader("../v_shader/resizeTopShader.vs","../f_shader/resizeTopShader.frag");
-	displayShades = new shader("../v_shader/displayShader.vs","../f_shader/displayShader.frag");
-	poolToConvTopShades = new shader("../v_shader/poolToConvTopShader.vs","../f_shader/poolToConvTopShader.frag");
-	convBackTopShades = new shader("../v_shader/convBackTopShader.vs","../f_shader/convBackTopShader.frag");
-	poolToConvShades = new shader("../v_shader/poolToConvShader.vs","../f_shader/poolToConvShader.frag");
-	resizeShades = new shader("../v_shader/resizeShader.vs","../f_shader/resizeShader.frag");	
-	convBackShades = new shader("../v_shader/convBackShader.vs","../f_shader/convBackShader.frag");
 
-
+	//load scene : scene used for checking purposes only
 	scene = new meshLoader();
+
+	//load MNIST file, read and store them
 	digitSet = new idxFileReader("../models/train-images.idx3-ubyte", "../models/train-labels.idx1-ubyte");
 
+
+	//load shader from file
+	displayShades = new shader("../v_shader/displayShader.vs","../f_shader/displayShader.frag");
+	convolutionFirstShades = new shader("../v_shader/convolutionFirstShader.vs","../f_shader/convolutionFirstShader.frag");
+	
+	//create Textures
 	colorImage = createTexture(SCREEN_WIDTH, SCREEN_HEIGHT);
+	convolutionFirstImage = createTexture(digitSet->getImageWidth(), digitSet->getImageHeight(), true);
 
-	convImageA = createTexture(digitSet->getImageWidth(), digitSet->getImageHeight(), true);
-	convImageB = createTexture(digitSet->getImageWidth(), digitSet->getImageHeight(), true);
-	poolingImageA = createTexture(digitSet->getImageWidth()/2.0, digitSet->getImageHeight()/2.0, true);
-	poolingImageB = createTexture(digitSet->getImageWidth()/2.0, digitSet->getImageHeight()/2.0, true);
-	convTopImage = createTexture(digitSet->getImageWidth()/2.0, digitSet->getImageHeight()/2.0, true);
-	poolingTopImage = createTexture(digitSet->getImageWidth()/4.0, digitSet->getImageHeight()/4.0, true);
 
-	gradientTexture = createRGBTexture(digitSet->getImageWidth()/4.0, digitSet->getImageHeight()/4.0);
-
-	resizeTopPoolImage = createTexture(digitSet->getImageWidth()/2.0, digitSet->getImageHeight()/2.0, true);
-	resizeTopGradientImage = createTexture(digitSet->getImageWidth()/2.0, digitSet->getImageHeight()/2.0, true);
-	saveInputTopImageA = createTexture(digitSet->getImageWidth()/2.0, digitSet->getImageHeight()/2.0, true);
-	saveInputTopImageB = createTexture(digitSet->getImageWidth()/2.0, digitSet->getImageHeight()/2.0, true);
-	poolToConvTopImage =  createTexture(digitSet->getImageWidth()/2.0, digitSet->getImageHeight()/2.0, true);
-	convBackTopImageA = createTexture(digitSet->getImageWidth()/2.0, digitSet->getImageHeight()/2.0, true);
-	convBackTopImageB = createTexture(digitSet->getImageWidth()/2.0, digitSet->getImageHeight()/2.0, true);
-	
-	resizePoolImageA = createTexture(digitSet->getImageWidth(), digitSet->getImageHeight(), true);
-	resizePoolImageB = createTexture(digitSet->getImageWidth(), digitSet->getImageHeight(), true);
-	resizeGradientImageA = createTexture(digitSet->getImageWidth(), digitSet->getImageHeight(), true);
-	resizeGradientImageB = createTexture(digitSet->getImageWidth(), digitSet->getImageHeight(), true);
-	saveInputImage = createTexture(digitSet->getImageWidth(), digitSet->getImageHeight(), true);
-	
-	poolToConvImageA = createTexture(digitSet->getImageWidth(), digitSet->getImageHeight(), true);
-	poolToConvImageB = createTexture(digitSet->getImageWidth(), digitSet->getImageHeight(), true);
-
-	convBackImage = createTexture(digitSet->getImageWidth(), digitSet->getImageHeight(), true);
-	
-	//for fully connected layer
-	int inputLayerSize = 3 * (digitSet->getImageWidth()/4) * (digitSet->getImageHeight()/4);
-	int hiddenLayerCount = 3;
+	//graph configuration for fully connected layer
+	int inputLayerSize = 3 * (digitSet->getImageWidth()) * (digitSet->getImageHeight());
+	int hiddenLayerCount = 1;
 	int outputLayerCount = 10;
-	int numCellsPerLayer = 80;
+	int numCellsPerLayer = 25;
 	mlpObject = new mlp(inputLayerSize, hiddenLayerCount, outputLayerCount, numCellsPerLayer);
 
-	convPixelBuffer = mlpObject->getPtrToInput();	//tex_w * tex_h * 4, tex_w = width()/4
+	//receive pointer to mlpObject's input buffer, input's label buffer and input's delta buffer
+	convPixelBuffer = mlpObject->getPtrToInput();	
 	labelBuffer = mlpObject->getPtrToLabel();
 	convGradientBuffer = mlpObject->getPtrToInputGradient();		
 
+
 	//defining frameBuffers with attached textures as render targets
+
+	//colorFBO to convert from char vals[0, 255] to floating point vals[0.0, 1.0] for pixels
 	glGenFramebuffers(1, &colorFBO);
 	glEnable(GL_TEXTURE_2D);
 	glBindFramebuffer(GL_FRAMEBUFFER,colorFBO);
@@ -153,85 +121,13 @@ void init()
 		std::cout << "Framebuffer is not OK, status=" << fbStatus << std::endl;
 	glBindFramebuffer(GL_FRAMEBUFFER,0);
 
-
-	glGenFramebuffers(1, &convFBO);
-	glEnable(GL_TEXTURE_2D);
-	glBindFramebuffer(GL_FRAMEBUFFER,convFBO);
-	glFramebufferTexture2D(GL_FRAMEBUFFER,GL_COLOR_ATTACHMENT0,GL_TEXTURE_2D,convImageA,0);
-	glFramebufferTexture2D(GL_FRAMEBUFFER,GL_COLOR_ATTACHMENT1,GL_TEXTURE_2D,convImageB,0);	
-	GLenum bufs[2] = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1};
-	glDrawBuffers(2, bufs);
 	
-	fbStatus = glCheckFramebufferStatus(GL_FRAMEBUFFER);
-	if(fbStatus != GL_FRAMEBUFFER_COMPLETE)
-		std::cout << "Framebuffer is not OK, status=" << fbStatus << std::endl;
-	glBindFramebuffer(GL_FRAMEBUFFER,0);
-
-	glGenFramebuffers(1, &poolingFBO);
+	//convolutionFirstFBO : convolution and ReLU operation
+	//kernel Matrix for operation, colorImage as input featureMap and colutionFirstImage[-inf, inf] as render target
+	glGenFramebuffers(1, &convolutionFirstFBO);
 	glEnable(GL_TEXTURE_2D);
-	glBindFramebuffer(GL_FRAMEBUFFER,poolingFBO);
-	glFramebufferTexture2D(GL_FRAMEBUFFER,GL_COLOR_ATTACHMENT0,GL_TEXTURE_2D,poolingImageA,0);
-	glFramebufferTexture2D(GL_FRAMEBUFFER,GL_COLOR_ATTACHMENT1,GL_TEXTURE_2D,poolingImageB,0);
-	GLenum buf[2] = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1};
-	glDrawBuffers(2, buf);
-
-	fbStatus = glCheckFramebufferStatus(GL_FRAMEBUFFER);
-	if(fbStatus != GL_FRAMEBUFFER_COMPLETE)
-		std::cout << "Framebuffer is not OK, status=" << fbStatus << std::endl;
-	glBindFramebuffer(GL_FRAMEBUFFER,0);
-
-	glGenFramebuffers(1, &convTopFBO);
-	glEnable(GL_TEXTURE_2D);
-	glBindFramebuffer(GL_FRAMEBUFFER,convTopFBO);
-	glFramebufferTexture2D(GL_FRAMEBUFFER,GL_COLOR_ATTACHMENT0,GL_TEXTURE_2D,convTopImage,0);
-
-	fbStatus = glCheckFramebufferStatus(GL_FRAMEBUFFER);
-	if(fbStatus != GL_FRAMEBUFFER_COMPLETE)
-		std::cout << "Framebuffer is not OK, status=" << fbStatus << std::endl;
-	glBindFramebuffer(GL_FRAMEBUFFER,0);
-
-	glGenFramebuffers(1, &poolingTopFBO);
-	glEnable(GL_TEXTURE_2D);
-	glBindFramebuffer(GL_FRAMEBUFFER,poolingTopFBO);
-	glFramebufferTexture2D(GL_FRAMEBUFFER,GL_COLOR_ATTACHMENT0,GL_TEXTURE_2D,poolingTopImage,0);
-
-	fbStatus = glCheckFramebufferStatus(GL_FRAMEBUFFER);
-	if(fbStatus != GL_FRAMEBUFFER_COMPLETE)
-		std::cout << "Framebuffer is not OK, status=" << fbStatus << std::endl;
-	glBindFramebuffer(GL_FRAMEBUFFER,0);
-
-	glGenFramebuffers(1, &resizeTopFBO);
-	glEnable(GL_TEXTURE_2D);
-	glBindFramebuffer(GL_FRAMEBUFFER, resizeTopFBO);
-	glFramebufferTexture2D(GL_FRAMEBUFFER,GL_COLOR_ATTACHMENT0,GL_TEXTURE_2D, resizeTopPoolImage,0);
-	glFramebufferTexture2D(GL_FRAMEBUFFER,GL_COLOR_ATTACHMENT1,GL_TEXTURE_2D, resizeTopGradientImage,0);
-	glFramebufferTexture2D(GL_FRAMEBUFFER,GL_COLOR_ATTACHMENT2,GL_TEXTURE_2D, saveInputTopImageA,0);
-	glFramebufferTexture2D(GL_FRAMEBUFFER,GL_COLOR_ATTACHMENT3,GL_TEXTURE_2D, saveInputTopImageB,0);
-	GLenum bufTopMap[4] = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1, GL_COLOR_ATTACHMENT2, GL_COLOR_ATTACHMENT3};
-	glDrawBuffers(4, bufTopMap);
-
-	fbStatus = glCheckFramebufferStatus(GL_FRAMEBUFFER);
-	if(fbStatus != GL_FRAMEBUFFER_COMPLETE)
-		std::cout << "Framebuffer is not OK, status=" << fbStatus << std::endl;
-	glBindFramebuffer(GL_FRAMEBUFFER,0);
-	
-	glGenFramebuffers(1, &poolToConvTopFBO);
-	glEnable(GL_TEXTURE_2D);
-	glBindFramebuffer(GL_FRAMEBUFFER,poolToConvTopFBO);
-	glFramebufferTexture2D(GL_FRAMEBUFFER,GL_COLOR_ATTACHMENT0,GL_TEXTURE_2D,poolToConvTopImage,0);
-
-	fbStatus = glCheckFramebufferStatus(GL_FRAMEBUFFER);
-	if(fbStatus != GL_FRAMEBUFFER_COMPLETE)
-		std::cout << "Framebuffer is not OK, status=" << fbStatus << std::endl;
-	glBindFramebuffer(GL_FRAMEBUFFER,0);
-
-	glGenFramebuffers(1, &convBackTopFBO);
-	glEnable(GL_TEXTURE_2D);
-	glBindFramebuffer(GL_FRAMEBUFFER,convBackTopFBO);
-	glFramebufferTexture2D(GL_FRAMEBUFFER,GL_COLOR_ATTACHMENT0,GL_TEXTURE_2D,convBackTopImageA,0);
-	glFramebufferTexture2D(GL_FRAMEBUFFER,GL_COLOR_ATTACHMENT1,GL_TEXTURE_2D,convBackTopImageB,0);
-	GLenum bufConvTop[2] = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1};
-	glDrawBuffers(2, bufConvTop);
+	glBindFramebuffer(GL_FRAMEBUFFER,convolutionFirstFBO);
+	glFramebufferTexture2D(GL_FRAMEBUFFER,GL_COLOR_ATTACHMENT0,GL_TEXTURE_2D,convolutionFirstImage,0);
 
 	fbStatus = glCheckFramebufferStatus(GL_FRAMEBUFFER);
 	if(fbStatus != GL_FRAMEBUFFER_COMPLETE)
@@ -239,36 +135,7 @@ void init()
 	glBindFramebuffer(GL_FRAMEBUFFER,0);
 
 
-	glGenFramebuffers(1, &resizeFBO);
-	glEnable(GL_TEXTURE_2D);
-	glBindFramebuffer(GL_FRAMEBUFFER, resizeFBO);
-	glFramebufferTexture2D(GL_FRAMEBUFFER,GL_COLOR_ATTACHMENT0,GL_TEXTURE_2D, resizePoolImageA,0);
-	glFramebufferTexture2D(GL_FRAMEBUFFER,GL_COLOR_ATTACHMENT1,GL_TEXTURE_2D, resizePoolImageB,0);
-	glFramebufferTexture2D(GL_FRAMEBUFFER,GL_COLOR_ATTACHMENT2,GL_TEXTURE_2D, resizeGradientImageA,0);
-	glFramebufferTexture2D(GL_FRAMEBUFFER,GL_COLOR_ATTACHMENT3,GL_TEXTURE_2D, resizeGradientImageB,0);
-	glFramebufferTexture2D(GL_FRAMEBUFFER,GL_COLOR_ATTACHMENT4,GL_TEXTURE_2D, saveInputImage,0);
-	GLenum bufMap[5] = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1, GL_COLOR_ATTACHMENT2, GL_COLOR_ATTACHMENT3, GL_COLOR_ATTACHMENT4};
-	glDrawBuffers(5, bufMap);
-
-
-	glGenFramebuffers(1, &poolToConvFBO);
-	glEnable(GL_TEXTURE_2D);
-	glBindFramebuffer(GL_FRAMEBUFFER,poolToConvFBO);
-	glFramebufferTexture2D(GL_FRAMEBUFFER,GL_COLOR_ATTACHMENT0,GL_TEXTURE_2D,poolToConvImageA,0);
-	glFramebufferTexture2D(GL_FRAMEBUFFER,GL_COLOR_ATTACHMENT1,GL_TEXTURE_2D,poolToConvImageB,0);
-	GLenum poolConvBuf[2] = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1};
-	glDrawBuffers(2, poolConvBuf);
-
-	glGenFramebuffers(1, &convBackFBO);
-	glEnable(GL_TEXTURE_2D);
-	glBindFramebuffer(GL_FRAMEBUFFER,convBackFBO);
-	glFramebufferTexture2D(GL_FRAMEBUFFER,GL_COLOR_ATTACHMENT0,GL_TEXTURE_2D,convBackImage,0);
-
-	fbStatus = glCheckFramebufferStatus(GL_FRAMEBUFFER);
-	if(fbStatus != GL_FRAMEBUFFER_COMPLETE)
-		std::cout << "Framebuffer is not OK, status=" << fbStatus << std::endl;
-	glBindFramebuffer(GL_FRAMEBUFFER,0);
-
+	//quad as 2D surface to attach and render textures, quadInverted is quad inverted vertically
 	{
 		std::vector<unsigned int> indices;
 		std::vector<vertexData> vertices;
@@ -339,498 +206,237 @@ void init()
 		quad = new mesh(&vertices,&indices);
 	}
 
+	//initialize kernel Matrices for convolution Operation
+	srand(time(NULL));	
+	float varFloat;
 
-	//random initialize kernels
-	for(int itr_k = 0; itr_k < 18; itr_k++){
-		kernelMatrix_1[itr_k][0][0] = 0.15;
-		kernelMatrix_1[itr_k][1][1] = 0.15;
-		kernelMatrix_1[itr_k][2][2] = 0.15;
-	//for(int itr_k = 0; itr_k < 18; itr_k++)
-		kernelMatrix_2[itr_k][0][0] = 0.05;
-		kernelMatrix_2[itr_k][1][1] = 0.05;
-		kernelMatrix_2[itr_k][2][2] = 0.05;}
+	for(int itr_i = 0; itr_i < 9; itr_i++)
+	{
+		for(int itr_j = 0; itr_j < 3; itr_j++)
+		{
+			for(int itr_k = 0; itr_k < 3; itr_k++)
+			 {
+				kernelFirstMatrix[itr_i][itr_j][itr_k] = (float)(rand() % 50) / 1000.0;
+			 }
+		}
+	}
 
+	//load and store first Image in digitTexture
+	 imgCount = digitSet->getImageCount();
+	 digitImage = digitSet->getImage(imageID);
+	 label = digitSet->getImageLabel(imageID);
+	digitTexture = createTexture(digitSet->getImageWidth(), digitSet->getImageHeight(), digitImage);
+	std::cout<<" imgCOunt "<<imgCount<<std::endl;
 
-
-/*
-//gaussian blur
-	kernelMatrix[0][0]=1.0/16.0;	kernelMatrix[0][1]=1.0/8.0;	kernelMatrix[0][2]=1.0/16.0;
-	kernelMatrix[1][0]=1.0/8.0;	kernelMatrix[1][1]=1.0/4.0;	kernelMatrix[1][2]=1.0/8.0;
-	kernelMatrix[2][0]=1.0/16.0;	kernelMatrix[2][1]=1.0/8.0;	kernelMatrix[2][2]=1.0/16.0;
-
-//sharpen
-	kernelMatrix[0][0]=0.0;	kernelMatrix[0][1]=-1.0;	kernelMatrix[0][2]=0.0;
-	kernelMatrix[1][0]=-1.0;	kernelMatrix[1][1]=5.00;	kernelMatrix[1][2]=-1.0;
-	kernelMatrix[2][0]=0.0;	kernelMatrix[2][1]=-1.0;	kernelMatrix[2][2]=0.0;
-
-//edge detection
-	kernelMatrix[0][0]=-1.0;	kernelMatrix[0][1]=-1.0;	kernelMatrix[0][2]=-1.0;
-	kernelMatrix[1][0]=-1.0;	kernelMatrix[1][1]=8.00;	kernelMatrix[1][2]=-1.0;
-	kernelMatrix[2][0]=-1.0;	kernelMatrix[2][1]=-1.0;	kernelMatrix[2][2]=-1.0;
-*/
-//identity
-
-	kernelMatrix[0][0]=0.0;	kernelMatrix[0][1]=0.0;	kernelMatrix[0][2]=0.0;
-	kernelMatrix[1][0]=0.0;	kernelMatrix[1][1]=1.0;	kernelMatrix[1][2]=0.0;
-	kernelMatrix[2][0]=0.0;	kernelMatrix[2][1]=0.0;	kernelMatrix[2][2]=0.0;
-
-
-
-	glClearColor(0.25, 0.25, 0.25, 1);
+	//draw Operation
+	glClearColor(0.0, 0.0, 0.0, 1);
 	pipeline.matrixMode(MODEL_MATRIX);
+
+imgCount = 0;
+float sumVal = 0.0;
+float sumV = 0.0;
+int correctOut = 0;
+
+	for(int itr = 0; itr < 20000; itr++)
+	{
+
+	 imageID = rand()%20000;
+	 digitImage = digitSet->getImage(imageID);
+	 label = digitSet->getImageLabel(imageID);
+	 updateTextureContent(digitTexture, digitSet->getImageWidth(), digitSet->getImageHeight(), digitImage);
+	 labelBuffer[label] = 1.0;
+
+	//image of charType converted to image of floating point type with RGBA vals, output colorImage
 	glBindFramebuffer(GL_FRAMEBUFFER,colorFBO);
 		displayShades->useShader();
 		glClear(GL_COLOR_BUFFER_BIT);
+
+		glActiveTexture(GL_TEXTURE0);
+		glBindTexture(GL_TEXTURE_2D, digitTexture);
+		glUniform1i(glGetUniformLocation(displayShades->getProgramId(),"texture0"),0);
+
+		glBindFragDataLocation(displayShades->getProgramId(), 0, "colorImage");
+
 		pipeline.updateMatrices(displayShades->getProgramId());
-		scene->draw(displayShades->getProgramId());
+		quad->draw(displayShades->getProgramId());
 		glBindTexture(GL_TEXTURE_2D, 0);
 		displayShades->delShader();
 	glBindFramebuffer(GL_FRAMEBUFFER,0);
 
 
-	 imgCount = digitSet->getImageCount();
-	glClearColor(0.0, 0.0, 0.0, 1.0);
+	//take colorImage and convolove, output convolutionFirstImage
+	glBindFramebuffer(GL_FRAMEBUFFER,convolutionFirstFBO);
+		convolutionFirstShades->useShader();
+		glClear(GL_COLOR_BUFFER_BIT);
+
+		//input Image for this instant
+		glActiveTexture(GL_TEXTURE0);
+		glBindTexture(GL_TEXTURE_2D, colorImage);
+		glUniform1i(glGetUniformLocation(convolutionFirstShades->getProgramId(),"inputImage"),0);		
+
+		//screen and texture size descriptions
+		glUniform1f(glGetUniformLocation(convolutionFirstShades->getProgramId(),"TEX_WIDTH"), digitSet->getImageWidth());
+		glUniform1f(glGetUniformLocation(convolutionFirstShades->getProgramId(),"TEX_HEIGHT"), digitSet->getImageHeight());
+		
+		glUniform1f(glGetUniformLocation(convolutionFirstShades->getProgramId(),"SCREEN_WIDTH"), SCREEN_WIDTH);
+		glUniform1f(glGetUniformLocation(convolutionFirstShades->getProgramId(),"SCREEN_HEIGHT"), SCREEN_HEIGHT);
+
+		//kernel Matrix to multiply input Image with
+	glUniformMatrix3fv(glGetUniformLocation(convolutionFirstShades->getProgramId(),"kernelMatrix"), 9, GL_FALSE, &kernelFirstMatrix[0][0][0]);
+
+		//output Images
+		glBindFragDataLocation(convolutionFirstShades->getProgramId(), 0, "convolutionFirstImage");
+
+		pipeline.updateMatrices(convolutionFirstShades->getProgramId());
+		quad->draw(convolutionFirstShades->getProgramId());
+		glBindTexture(GL_TEXTURE_2D, 0);		
+		convolutionFirstShades->delShader();
+	glBindFramebuffer(GL_FRAMEBUFFER,0);
+
 	
+	//read contents of convolutionFirstImage and store it in convPixel Buffer for forward pass to MLP
+	glBindFramebuffer(GL_FRAMEBUFFER, convolutionFirstFBO);
+	glReadBuffer(GL_COLOR_ATTACHMENT0);
+	glReadPixels(0, 0, digitSet->getImageWidth(), digitSet->getImageHeight(), GL_RGB, GL_FLOAT, convPixelBuffer);		//123
+	glReadBuffer(GL_BACK);
+	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+
+	//forward MLP
+		imgCount++;
+		sumVal = mlpObject->learnFromMLP(0.85, label, imageID);
+		sumV += sumVal;
+		if(sumVal < 0.2) correctOut++;
+	
+		if(imgCount >= 1000)
+		{
+			imgCount = 0;
+			std::cout<<"itr "<<itr<<"P "<<sumV/1000.0<<" correction "<<correctOut<<std::endl;
+			sumVal = 0.0;
+			sumV = 0.0;
+			correctOut = 0;
+		}
+	
+	 labelBuffer[label] = 0.0;
+
+	}
+
+	correctOut = 0;
+	//testing phase
+	for(int itr = 0; itr < 50; itr++)
+	{
+		imageID = 20000 + (rand() % 500);
+		 digitImage = digitSet->getImage(imageID);
+		 label = digitSet->getImageLabel(imageID);
+	 	updateTextureContent(digitTexture, digitSet->getImageWidth(), digitSet->getImageHeight(), digitImage);
+
+	//image of charType converted to image of floating point type with RGBA vals, output colorImage
+	glBindFramebuffer(GL_FRAMEBUFFER,colorFBO);
+		displayShades->useShader();
+		glClear(GL_COLOR_BUFFER_BIT);
+
+		glActiveTexture(GL_TEXTURE0);
+		glBindTexture(GL_TEXTURE_2D, digitTexture);
+		glUniform1i(glGetUniformLocation(displayShades->getProgramId(),"texture0"),0);
+
+		glBindFragDataLocation(displayShades->getProgramId(), 0, "colorImage");
+
+		pipeline.updateMatrices(displayShades->getProgramId());
+		quad->draw(displayShades->getProgramId());
+		glBindTexture(GL_TEXTURE_2D, 0);
+		displayShades->delShader();
+	glBindFramebuffer(GL_FRAMEBUFFER,0);
+
+
+	//take colorImage and convolove, output convolutionFirstImage
+	glBindFramebuffer(GL_FRAMEBUFFER,convolutionFirstFBO);
+		convolutionFirstShades->useShader();
+		glClear(GL_COLOR_BUFFER_BIT);
+
+		//input Image for this instant
+		glActiveTexture(GL_TEXTURE0);
+		glBindTexture(GL_TEXTURE_2D, colorImage);
+		glUniform1i(glGetUniformLocation(convolutionFirstShades->getProgramId(),"inputImage"),0);		
+
+		//screen and texture size descriptions
+		glUniform1f(glGetUniformLocation(convolutionFirstShades->getProgramId(),"TEX_WIDTH"), digitSet->getImageWidth());
+		glUniform1f(glGetUniformLocation(convolutionFirstShades->getProgramId(),"TEX_HEIGHT"), digitSet->getImageHeight());
+		
+		glUniform1f(glGetUniformLocation(convolutionFirstShades->getProgramId(),"SCREEN_WIDTH"), SCREEN_WIDTH);
+		glUniform1f(glGetUniformLocation(convolutionFirstShades->getProgramId(),"SCREEN_HEIGHT"), SCREEN_HEIGHT);
+
+		//kernel Matrix to multiply input Image with
+	glUniformMatrix3fv(glGetUniformLocation(convolutionFirstShades->getProgramId(),"kernelMatrix"), 9, GL_FALSE, &kernelFirstMatrix[0][0][0]);
+
+		//output Images
+		glBindFragDataLocation(convolutionFirstShades->getProgramId(), 0, "convolutionFirstImage");
+
+		pipeline.updateMatrices(convolutionFirstShades->getProgramId());
+		quad->draw(convolutionFirstShades->getProgramId());
+		glBindTexture(GL_TEXTURE_2D, 0);		
+		convolutionFirstShades->delShader();
+		glBindFramebuffer(GL_FRAMEBUFFER,0);
+
+	
+	//read contents of convolutionFirstImage and store it in convPixel Buffer for forward pass to MLP
+	glBindFramebuffer(GL_FRAMEBUFFER, convolutionFirstFBO);
+	glReadBuffer(GL_COLOR_ATTACHMENT0);
+	glReadPixels(0, 0, digitSet->getImageWidth(), digitSet->getImageHeight(), GL_RGB, GL_FLOAT, convPixelBuffer);		//123
+	glReadBuffer(GL_BACK);
+	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+	imgCount = mlpObject->testMLP();
+	std::cout<<" itertation "<<itr<<" actual label "<<label<<" calc Label "<<imgCount<<std::endl;
+	if(label == imgCount) correctOut++;
+	}
+	std::cout<<" correctCount "<<correctOut<<" percent "<<(float)correctOut/50.0<<std::endl;
+
+/*
+imgCount = 0;
+float sumVal = 0.0;
+float sumV = 0.0;
+int correctOut = 0;
+	for(int itr = 0; itr < 1000000; itr++)
+	{
+	 if(itr % 10000 == 0) srand(time(NULL));
+
+	 imageID = rand()%8000;
 	 digitImage = digitSet->getImage(imageID);
 	 label = digitSet->getImageLabel(imageID);
-	digitTexture = createTexture(digitSet->getImageWidth(), digitSet->getImageHeight(), digitImage);
-	// prevImageID = imageID;
+//	 std::cout<<std::endl<<" label "<<label<<std::endl;
+//	 updateTextureContent(digitTexture, digitSet->getImageWidth(), digitSet->getImageHeight(), digitImage);
+//	 prevImageID = imageID;
+		
+	for(int it = 0; it < (digitSet->getImageWidth()) * (digitSet->getImageHeight()); it++)
+		convPixelBuffer[it] = (float)digitImage[it]/255.0;
 
+	labelBuffer[label] = 1.0;
+
+	if(1) 
+	{
+		imgCount++;
+		sumVal = mlpObject->learnFromMLP(0.85, label, imageID);
+		sumV += sumVal;
+		if(sumVal < 0.2) correctOut++;
+	}
+	if(imgCount >= 1000)
+	{
+		imgCount = 0;
+		std::cout<<"itr "<<itr<<"P "<<sumV/1000.0<<" correction "<<correctOut<<std::endl;
+		sumVal = 0.0;
+		sumV = 0.0;
+		correctOut = 0;
+	}
+	
+	 labelBuffer[label] = 0.0;
+	}
+
+*/
 }
 
 
-
-
-std::clock_t displayStart, displayEnd;
 void display()
-{
-	if(imageID != prevImageID && imageID < imgCount)
-	{
-	 displayStart = std::clock();
-
-	 digitImage = digitSet->getImage(imageID);
-	 label = digitSet->getImageLabel(imageID);
-	 std::cout<<std::endl<<" label "<<label<<std::endl;
-	 updateTextureContent(digitTexture, digitSet->getImageWidth(), digitSet->getImageHeight(), digitImage);
-	 prevImageID = imageID;
-		
-	labelBuffer[label] = 1.0;
-
-
-	//take input Image: digitTexture and convolve using matrix: kernelMatrix_1 to give output convImageA and convImageB
-	glBindFramebuffer(GL_FRAMEBUFFER,convFBO);
-		convShades->useShader();
-		glClear(GL_COLOR_BUFFER_BIT);
-		glActiveTexture(GL_TEXTURE0);
-		glBindTexture(GL_TEXTURE_2D, digitTexture);
-		glUniform1i(glGetUniformLocation(convShades->getProgramId(),"grayInputImage"),0);
-
-		glActiveTexture(GL_TEXTURE1);
-		glBindTexture(GL_TEXTURE_2D, saveInputImage);
-		glUniform1i(glGetUniformLocation(convShades->getProgramId(),"saveInputImage"),1);
-
-		glActiveTexture(GL_TEXTURE2);
-		glBindTexture(GL_TEXTURE_2D, poolToConvImageA);
-		glUniform1i(glGetUniformLocation(convShades->getProgramId(),"gradientImageA"),2);
-
-		glActiveTexture(GL_TEXTURE3);
-		glBindTexture(GL_TEXTURE_2D, poolToConvImageB);
-		glUniform1i(glGetUniformLocation(convShades->getProgramId(),"gradientImageB"),3);
-		
-		glUniform1f(glGetUniformLocation(convShades->getProgramId(),"TEX_WIDTH"), digitSet->getImageWidth());
-		glUniform1f(glGetUniformLocation(convShades->getProgramId(),"TEX_HEIGHT"), digitSet->getImageHeight());
-		
-		glUniform1f(glGetUniformLocation(convShades->getProgramId(),"SCREEN_WIDTH"), SCREEN_WIDTH);
-		glUniform1f(glGetUniformLocation(convShades->getProgramId(),"SCREEN_HEIGHT"), SCREEN_HEIGHT);
-
-		glUniformMatrix3fv(glGetUniformLocation(convShades->getProgramId(),"kernelMatrix"), 18, GL_FALSE, &kernelMatrix_1[0][0][0]);
-
-		glBindFragDataLocation(convShades->getProgramId(), 0, "texA");
-		glBindFragDataLocation(convShades->getProgramId(), 1, "texB");
-
-		pipeline.updateMatrices(convShades->getProgramId());
-		quad->draw(convShades->getProgramId());
-		glBindTexture(GL_TEXTURE_2D, 0);		
-		convShades->delShader();
-	glBindFramebuffer(GL_FRAMEBUFFER,0);
-
-
-	//convImageA and convImageB are maxPooled to obtain poolingImageA and poolingImageB
-	//convImageA and convImageB are of size texWidth * texHeight
-	//poolingImageA and poolingImageB are of size texWidth/2 and texHeight/2
-	glBindFramebuffer(GL_FRAMEBUFFER,poolingFBO);
-		poolingShades->useShader();
-		glClear(GL_COLOR_BUFFER_BIT);
-		glActiveTexture(GL_TEXTURE0);
-		glBindTexture(GL_TEXTURE_2D, convImageA);
-		glUniform1i(glGetUniformLocation(poolingShades->getProgramId(),"texA"),0);
-		glActiveTexture(GL_TEXTURE1);
-		glBindTexture(GL_TEXTURE_2D, convImageB);
-		glUniform1i(glGetUniformLocation(poolingShades->getProgramId(),"texB"),1);
-		
-		glUniform1f(glGetUniformLocation(poolingShades->getProgramId(),"TEX_WIDTH"), digitSet->getImageWidth());
-		glUniform1f(glGetUniformLocation(poolingShades->getProgramId(),"TEX_HEIGHT"), digitSet->getImageHeight());
-		
-		glUniform1f(glGetUniformLocation(poolingShades->getProgramId(),"SCREEN_WIDTH"), SCREEN_WIDTH);
-		glUniform1f(glGetUniformLocation(poolingShades->getProgramId(),"SCREEN_HEIGHT"), SCREEN_HEIGHT);
-
-		glBindFragDataLocation(poolingShades->getProgramId(), 0, "poolTexA");
-		glBindFragDataLocation(poolingShades->getProgramId(), 1, "poolTexB");
-
-		pipeline.updateMatrices(poolingShades->getProgramId());
-		quad->draw(poolingShades->getProgramId());
-		glBindTexture(GL_TEXTURE_2D, 0);
-		poolingShades->delShader();
-	 glBindFramebuffer(GL_FRAMEBUFFER,0);
-
-
-	//take pooled images and perform convolution to give single convolved output image convTopImage
-	//convTopImage is of size texWidth/2 X texHeight/2
-	glBindFramebuffer(GL_FRAMEBUFFER,convTopFBO);
-		convTopShades->useShader();
-		glClear(GL_COLOR_BUFFER_BIT);
-		glActiveTexture(GL_TEXTURE0);
-		glBindTexture(GL_TEXTURE_2D, poolingImageA);
-		glUniform1i(glGetUniformLocation(convTopShades->getProgramId(),"firstInputImage"),0);
-
-		glActiveTexture(GL_TEXTURE1);
-		glBindTexture(GL_TEXTURE_2D, poolingImageB);
-		glUniform1i(glGetUniformLocation(convTopShades->getProgramId(),"secondInputImage"),1);
-
-		glActiveTexture(GL_TEXTURE2);
-		glBindTexture(GL_TEXTURE_2D, saveInputTopImageA);
-		glUniform1i(glGetUniformLocation(convTopShades->getProgramId(),"saveInputImageA"),2);
-
-		glActiveTexture(GL_TEXTURE3);
-		glBindTexture(GL_TEXTURE_2D, saveInputTopImageB);
-		glUniform1i(glGetUniformLocation(convTopShades->getProgramId(),"saveInputImageB"),3);
-
-		glActiveTexture(GL_TEXTURE4);
-		glBindTexture(GL_TEXTURE_2D, poolToConvTopImage);
-		glUniform1i(glGetUniformLocation(convTopShades->getProgramId(),"gradientImage"),4);
-		
-
-		//inputTextureSize 60% sure
-		glUniform1f(glGetUniformLocation(convTopShades->getProgramId(),"TEX_WIDTH"), digitSet->getImageWidth()/2.0);
-		glUniform1f(glGetUniformLocation(convTopShades->getProgramId(),"TEX_HEIGHT"), digitSet->getImageHeight()/2.0);
-		
-		glUniform1f(glGetUniformLocation(convTopShades->getProgramId(),"SCREEN_WIDTH"), SCREEN_WIDTH);
-		glUniform1f(glGetUniformLocation(convTopShades->getProgramId(),"SCREEN_HEIGHT"), SCREEN_HEIGHT);
-
-		glUniformMatrix3fv(glGetUniformLocation(convTopShades->getProgramId(),"kernelMatrix"), 18, GL_FALSE, &kernelMatrix_2[0][0][0]);
-
-		glBindFragDataLocation(convTopShades->getProgramId(), 0, "texA");
-
-		pipeline.updateMatrices(convTopShades->getProgramId());
-		quad->draw(convTopShades->getProgramId());
-		glBindTexture(GL_TEXTURE_2D, 0);		
-		convTopShades->delShader();
-	glBindFramebuffer(GL_FRAMEBUFFER,0);
-	
-	//take convolved Image and maxPool to obtain texture of size texWidth/4 X texHeight/4
-	//output Image is poolingTopImage
-	
-	glBindFramebuffer(GL_FRAMEBUFFER,poolingTopFBO);
-	poolingTopShades->useShader();
-	glClear(GL_COLOR_BUFFER_BIT);
-		glActiveTexture(GL_TEXTURE0);
-		glBindTexture(GL_TEXTURE_2D, convTopImage);
-		glUniform1i(glGetUniformLocation(poolingTopShades->getProgramId(),"texA"),0);
-
-		glUniform1f(glGetUniformLocation(poolingTopShades->getProgramId(),"TEX_WIDTH"), digitSet->getImageWidth()/2.0);
-		glUniform1f(glGetUniformLocation(poolingTopShades->getProgramId(),"TEX_HEIGHT"), digitSet->getImageHeight()/2.0);
-		
-		glUniform1f(glGetUniformLocation(poolingTopShades->getProgramId(),"SCREEN_WIDTH"), SCREEN_WIDTH);
-		glUniform1f(glGetUniformLocation(poolingTopShades->getProgramId(),"SCREEN_HEIGHT"), SCREEN_HEIGHT);
-
-		glBindFragDataLocation(poolingTopShades->getProgramId(), 0, "poolTex");
-		glBindFragDataLocation(poolingTopShades->getProgramId(), 1, "poolMap");
-
-	pipeline.updateMatrices(poolingTopShades->getProgramId());
-	quad->draw(poolingTopShades->getProgramId());
-	poolingTopShades->delShader();
-	glBindFramebuffer(GL_FRAMEBUFFER,0);
-
-
-	//end of forward Pass, the resulting image pixels is of size width*height*channel = 7*7*3
-	//extract 7X7X3 pixel values from poolingTopImage Texture
-	glBindFramebuffer(GL_FRAMEBUFFER, poolingTopFBO);
-	glReadBuffer(GL_COLOR_ATTACHMENT0);
-	glReadPixels(0, 0, digitSet->getImageWidth()/4, digitSet->getImageHeight()/4, GL_RGB, GL_FLOAT, convPixelBuffer);		//123
-	glReadBuffer(GL_BACK);
-	glBindFramebuffer(GL_FRAMEBUFFER, 0);
-
-
-	//feed input data contained in convPixel Buffer to Fully Connected Layer
-	//the size and/or graph of FCC layer can be changed through mlpObject
-	//labelBuffer is initilally assigned to 1.0 and then reset to 0.0 for making room for next feed forward operation
-	mlpObject->learnFromMLP(0.85, label, imageID);
-	 labelBuffer[label] = 0.0;
-	
-/*	std::cout<<std::endl<<" after "<<std::endl;
-
-	for(int it = 0; it < digitSet->getImageWidth()/4 * digitSet->getImageHeight()/4; it++)
-	{
-		std::cout<<std::endl;
-		std::cout<<" "<<it<<" "<<convGradientBuffer[3*it+0]<<"  "<<convGradientBuffer[3*it+1]<<"  "<<convGradientBuffer[3*it+2];
-	}
-*/
-
-
-	//after gradient update has been performed, save the gradient values into a texture
-	updateTextureContent(gradientTexture, digitSet->getImageWidth()/4, digitSet->getImageHeight()/4, convGradientBuffer);
-
-	
-	//gradient value is of size texWidth/4 X texHeight/4
-	//change the texture widtht to size texWidth/2 X texHeight/2
-	//also save convTopImage as savedConvTopImage
-	//savedConvTopImage is used as input to latter feedforward process for gradient updating
-	
-	glBindFramebuffer(GL_FRAMEBUFFER, resizeTopFBO);
-	resizeTopShades->useShader();
-	glClear(GL_COLOR_BUFFER_BIT);
-		glActiveTexture(GL_TEXTURE0);
-		glBindTexture(GL_TEXTURE_2D, poolingTopImage);
-		glUniform1i(glGetUniformLocation(resizeTopShades->getProgramId(),"poolImage"),0);
-
-		glActiveTexture(GL_TEXTURE1);
-		glBindTexture(GL_TEXTURE_2D, gradientTexture);
-		glUniform1i(glGetUniformLocation(resizeTopShades->getProgramId(),"gradImage"),1);
-
-		glActiveTexture(GL_TEXTURE2);
-		glBindTexture(GL_TEXTURE_2D, poolingImageA);
-		glUniform1i(glGetUniformLocation(resizeTopShades->getProgramId(),"inputImageA"),2);
-
-		glActiveTexture(GL_TEXTURE3);
-		glBindTexture(GL_TEXTURE_2D, poolingImageB);
-		glUniform1i(glGetUniformLocation(resizeTopShades->getProgramId(),"inputImageB"),3);
-
-		glUniform1f(glGetUniformLocation(resizeTopShades->getProgramId(),"TEX_WIDTH"), digitSet->getImageWidth()/2.0);
-		glUniform1f(glGetUniformLocation(resizeTopShades->getProgramId(),"TEX_HEIGHT"), digitSet->getImageHeight()/2.0);
-		
-		glUniform1f(glGetUniformLocation(resizeTopShades->getProgramId(),"SCREEN_WIDTH"), SCREEN_WIDTH);
-		glUniform1f(glGetUniformLocation(resizeTopShades->getProgramId(),"SCREEN_HEIGHT"), SCREEN_HEIGHT);
-
-		glBindFragDataLocation(resizeTopShades->getProgramId(), 0, "poolTex");
-		glBindFragDataLocation(resizeTopShades->getProgramId(), 1, "gradTex");
-		glBindFragDataLocation(resizeTopShades->getProgramId(), 2, "saveInputTopImageA");
-		glBindFragDataLocation(resizeTopShades->getProgramId(), 2, "saveInputTopImageB");
-
-	pipeline.updateMatrices(resizeTopShades->getProgramId());
-	quad->draw(resizeTopShades->getProgramId());
-	resizeTopShades->delShader();
-	glBindFramebuffer(GL_FRAMEBUFFER,0);
-
-/*
-	glBindFramebuffer(GL_FRAMEBUFFER, resizeTopFBO);
-	glReadBuffer(GL_COLOR_ATTACHMENT1);
-	glReadPixels(0, 0, digitSet->getImageWidth()/2, digitSet->getImageHeight()/2, GL_RGBA, GL_FLOAT, testBuffer);		//123
-	glReadBuffer(GL_BACK);
-	glBindFramebuffer(GL_FRAMEBUFFER, 0);
-
-	std::cout<<std::endl<<" after "<<std::endl;
-
-	for(int it = 0; it < digitSet->getImageWidth()/2 * digitSet->getImageHeight()/2; it++)
-	{
-		std::cout<<std::endl;
-		std::cout<<" "<<it<<" "<<testBuffer[4*it+0]<<"  "<<testBuffer[4*it+1]<<"  "<<testBuffer[4*it+2]<<"  "<<testBuffer[4*it+3];
-	}
-*/
-
-
-	//resized Image fits the size to that of convolved Output Image
-	//this layer backprops the image in terms of pooling Layer and Rectified Linear Unit
-	//output is an image of gradient values
-	glBindFramebuffer(GL_FRAMEBUFFER, poolToConvTopFBO);
-	poolToConvTopShades->useShader();
-	glClear(GL_COLOR_BUFFER_BIT);
-		glActiveTexture(GL_TEXTURE0);
-		glBindTexture(GL_TEXTURE_2D, resizeTopPoolImage);
-		glUniform1i(glGetUniformLocation(poolToConvTopShades->getProgramId(),"poolImage"),0);
-
-		glActiveTexture(GL_TEXTURE1);
-		glBindTexture(GL_TEXTURE_2D, resizeTopGradientImage);
-		glUniform1i(glGetUniformLocation(poolToConvTopShades->getProgramId(),"gradImage"),1);
-		
-		glActiveTexture(GL_TEXTURE2);
-		glBindTexture(GL_TEXTURE_2D, convTopImage);
-		glUniform1i(glGetUniformLocation(poolToConvTopShades->getProgramId(),"convImage"),2);
-
-		glUniform1f(glGetUniformLocation(poolToConvTopShades->getProgramId(),"TEX_WIDTH"), digitSet->getImageWidth()/2.0);
-		glUniform1f(glGetUniformLocation(poolToConvTopShades->getProgramId(),"TEX_HEIGHT"), digitSet->getImageHeight()/2.0);
-		
-		glUniform1f(glGetUniformLocation(poolToConvTopShades->getProgramId(),"SCREEN_WIDTH"), SCREEN_WIDTH);
-		glUniform1f(glGetUniformLocation(poolToConvTopShades->getProgramId(),"SCREEN_HEIGHT"), SCREEN_HEIGHT);
-
-		glBindFragDataLocation(poolToConvTopShades->getProgramId(), 0, "gradTex");
-
-	pipeline.updateMatrices(poolToConvTopShades->getProgramId());
-	quad->draw(poolToConvTopShades->getProgramId());
-	poolToConvTopShades->delShader();
-	glBindFramebuffer(GL_FRAMEBUFFER,0);
-
-
-	//use gradient values to backprop through convolution layer: Input is gradient Image
-	//output value is gradient value for convolved Image
-
-	glBindFramebuffer(GL_FRAMEBUFFER, convBackTopFBO);
-	convBackTopShades->useShader();
-	glClear(GL_COLOR_BUFFER_BIT);
-		glActiveTexture(GL_TEXTURE0);
-		glBindTexture(GL_TEXTURE_2D, poolToConvTopImage);
-		glUniform1i(glGetUniformLocation(convBackTopShades->getProgramId(),"inputImage"),0);
-
-		glUniform1f(glGetUniformLocation(convBackTopShades->getProgramId(),"TEX_WIDTH"), digitSet->getImageWidth()/2.0);
-		glUniform1f(glGetUniformLocation(convBackTopShades->getProgramId(),"TEX_HEIGHT"), digitSet->getImageHeight()/2.0);
-		
-		glUniform1f(glGetUniformLocation(convBackTopShades->getProgramId(),"SCREEN_WIDTH"), SCREEN_WIDTH);
-		glUniform1f(glGetUniformLocation(convBackTopShades->getProgramId(),"SCREEN_HEIGHT"), SCREEN_HEIGHT);
-	glUniformMatrix3fv(glGetUniformLocation(convBackTopShades->getProgramId(),"kernelMatrix"), 18, GL_FALSE, &kernelMatrix_2[0][0][0]);
-
-		glBindFragDataLocation(convBackTopShades->getProgramId(), 0, "convBackTexA");
-		glBindFragDataLocation(convBackTopShades->getProgramId(), 1, "convBackTexB");
-
-	pipeline.updateMatrices(convBackTopShades->getProgramId());
-	quad->draw(convBackTopShades->getProgramId());
-	convBackTopShades->delShader();
-	glBindFramebuffer(GL_FRAMEBUFFER,0);
-
-
-	//resize gradient image and pooling image to match texWidth and texHeight
-	//also save convolution output values of Layer: convImageA and convImageB
-	glBindFramebuffer(GL_FRAMEBUFFER, resizeFBO);
-	resizeShades->useShader();
-	glClear(GL_COLOR_BUFFER_BIT);
-		glActiveTexture(GL_TEXTURE0);
-		glBindTexture(GL_TEXTURE_2D, poolingImageA);
-		glUniform1i(glGetUniformLocation(resizeShades->getProgramId(),"poolImageA"),0);
-
-		glActiveTexture(GL_TEXTURE1);
-		glBindTexture(GL_TEXTURE_2D, poolingImageB);
-		glUniform1i(glGetUniformLocation(resizeShades->getProgramId(),"poolImageB"),1);
-
-		glActiveTexture(GL_TEXTURE2);
-		glBindTexture(GL_TEXTURE_2D, convBackTopImageA);
-		glUniform1i(glGetUniformLocation(resizeShades->getProgramId(),"gradImageA"),2);
-
-		glActiveTexture(GL_TEXTURE3);
-		glBindTexture(GL_TEXTURE_2D, convBackTopImageB);
-		glUniform1i(glGetUniformLocation(resizeShades->getProgramId(),"gradImageB"),3);
-
-		glActiveTexture(GL_TEXTURE4);
-		glBindTexture(GL_TEXTURE_2D, digitTexture);
-		glUniform1i(glGetUniformLocation(resizeShades->getProgramId(),"inputImage"),4);
-
-		glUniform1f(glGetUniformLocation(resizeShades->getProgramId(),"TEX_WIDTH"), digitSet->getImageWidth());
-		glUniform1f(glGetUniformLocation(resizeShades->getProgramId(),"TEX_HEIGHT"), digitSet->getImageHeight());
-		
-		glUniform1f(glGetUniformLocation(resizeShades->getProgramId(),"SCREEN_WIDTH"), SCREEN_WIDTH);
-		glUniform1f(glGetUniformLocation(resizeShades->getProgramId(),"SCREEN_HEIGHT"), SCREEN_HEIGHT);
-
-		glBindFragDataLocation(resizeShades->getProgramId(), 0, "poolTexA");
-		glBindFragDataLocation(resizeShades->getProgramId(), 1, "poolTexB");
-		glBindFragDataLocation(resizeShades->getProgramId(), 2, "gradTexA");
-		glBindFragDataLocation(resizeShades->getProgramId(), 3, "gradTexB");
-		glBindFragDataLocation(resizeShades->getProgramId(), 4, "saveInputImage");
-
-	pipeline.updateMatrices(resizeShades->getProgramId());
-	quad->draw(resizeShades->getProgramId());
-	resizeShades->delShader();
-	glBindFramebuffer(GL_FRAMEBUFFER,0);
-
-
-	//take resized image and backprop through pooling layers
-	glBindFramebuffer(GL_FRAMEBUFFER, poolToConvFBO);
-	poolToConvShades->useShader();
-	glClear(GL_COLOR_BUFFER_BIT);
-		glActiveTexture(GL_TEXTURE0);
-		glBindTexture(GL_TEXTURE_2D, resizePoolImageA);
-		glUniform1i(glGetUniformLocation(poolToConvShades->getProgramId(),"poolImageA"),0);
-
-		glActiveTexture(GL_TEXTURE1);
-		glBindTexture(GL_TEXTURE_2D, resizePoolImageB);
-		glUniform1i(glGetUniformLocation(poolToConvShades->getProgramId(),"poolImageB"),1);
-
-		glActiveTexture(GL_TEXTURE2);
-		glBindTexture(GL_TEXTURE_2D, resizeGradientImageA);
-		glUniform1i(glGetUniformLocation(poolToConvShades->getProgramId(),"gradImageA"),2);
-
-		glActiveTexture(GL_TEXTURE3);
-		glBindTexture(GL_TEXTURE_2D, resizeGradientImageB);
-		glUniform1i(glGetUniformLocation(poolToConvShades->getProgramId(),"gradImageB"),3);
-
-		glActiveTexture(GL_TEXTURE4);
-		glBindTexture(GL_TEXTURE_2D, convImageA);
-		glUniform1i(glGetUniformLocation(poolToConvShades->getProgramId(),"convImageA"),4);
-
-		glActiveTexture(GL_TEXTURE5);
-		glBindTexture(GL_TEXTURE_2D, convImageB);
-		glUniform1i(glGetUniformLocation(poolToConvShades->getProgramId(),"convImageB"),5);
-
-		glUniform1f(glGetUniformLocation(poolToConvShades->getProgramId(),"TEX_WIDTH"), digitSet->getImageWidth());
-		glUniform1f(glGetUniformLocation(poolToConvShades->getProgramId(),"TEX_HEIGHT"), digitSet->getImageHeight());
-		
-		glUniform1f(glGetUniformLocation(poolToConvShades->getProgramId(),"SCREEN_WIDTH"), SCREEN_WIDTH);
-		glUniform1f(glGetUniformLocation(poolToConvShades->getProgramId(),"SCREEN_HEIGHT"), SCREEN_HEIGHT);
-
-		glBindFragDataLocation(poolToConvShades->getProgramId(), 0, "gradientTexA");
-		glBindFragDataLocation(poolToConvShades->getProgramId(), 1, "gradientTexB");
-
-	pipeline.updateMatrices(poolToConvShades->getProgramId());
-	quad->draw(poolToConvShades->getProgramId());
-	poolToConvShades->delShader();
-	glBindFramebuffer(GL_FRAMEBUFFER,0);
-
-
-	//take gradient Image and backprop to obtain error gradients of Convolution Layer
-	glBindFramebuffer(GL_FRAMEBUFFER, convBackFBO);
-	convBackShades->useShader();
-	glClear(GL_COLOR_BUFFER_BIT);
-		glActiveTexture(GL_TEXTURE0);
-		glBindTexture(GL_TEXTURE_2D, poolToConvImageA);
-		glUniform1i(glGetUniformLocation(convBackShades->getProgramId(),"firstInputImage"),0);
-
-		glActiveTexture(GL_TEXTURE1);
-		glBindTexture(GL_TEXTURE_2D, poolToConvImageB);
-		glUniform1i(glGetUniformLocation(convBackShades->getProgramId(),"secondInputImage"),1);
-
-		glUniform1f(glGetUniformLocation(convBackShades->getProgramId(),"TEX_WIDTH"), digitSet->getImageWidth());
-		glUniform1f(glGetUniformLocation(convBackShades->getProgramId(),"TEX_HEIGHT"), digitSet->getImageHeight());
-		
-		glUniform1f(glGetUniformLocation(convBackShades->getProgramId(),"SCREEN_WIDTH"), SCREEN_WIDTH);
-		glUniform1f(glGetUniformLocation(convBackShades->getProgramId(),"SCREEN_HEIGHT"), SCREEN_HEIGHT);
-	glUniformMatrix3fv(glGetUniformLocation(convBackShades->getProgramId(),"kernelMatrix"), 18, GL_FALSE, &kernelMatrix_1[0][0][0]);
-
-		glBindFragDataLocation(convBackShades->getProgramId(), 0, "convBackTex");
-
-	pipeline.updateMatrices(convBackShades->getProgramId());
-	quad->draw(convBackShades->getProgramId());
-	convBackShades->delShader();
-	glBindFramebuffer(GL_FRAMEBUFFER,0);
-
-/*
-	//read gradient values to update params
-	glBindFramebuffer(GL_FRAMEBUFFER, poolToConvTopFBO);
-	glReadBuffer(GL_COLOR_ATTACHMENT0);
-	glReadPixels(0, 0, digitSet->getImageWidth()/2, digitSet->getImageHeight()/2, GL_RGBA, GL_FLOAT, testBuffer);		//123
-	glReadBuffer(GL_BACK);
-	glBindFramebuffer(GL_FRAMEBUFFER, 0);
-
-	std::cout<<std::endl<<" after "<<std::endl;
-
-	for(int it = 0; it < digitSet->getImageWidth()/2 * digitSet->getImageHeight()/2; it++)
-	{
-		std::cout<<std::endl;
-		std::cout<<" "<<it<<" "<<testBuffer[4*it+0]<<"  "<<testBuffer[4*it+1]<<"  "<<testBuffer[4*it+2]<<"  "<<testBuffer[4*it+3];
-	}
-*/
-
-	displayEnd = std::clock();
-	std::cout<<std::endl<<" time taken "<<( displayEnd - displayStart ) / (double) CLOCKS_PER_SEC<<std::endl;
-
-
-
-	}
+{	
 
 
 	//display ouput, less changes on produced results
@@ -838,7 +444,7 @@ void display()
 	displayShades->useShader();
 	glClear(GL_COLOR_BUFFER_BIT);
 		glActiveTexture(GL_TEXTURE0);
-		glBindTexture(GL_TEXTURE_2D, saveInputTopImageB);
+		glBindTexture(GL_TEXTURE_2D, convolutionFirstImage);
 		glUniform1i(glGetUniformLocation(displayShades->getProgramId(),"texture0"),0);
 	pipeline.updateMatrices(displayShades->getProgramId());
 	quadInverted->draw(displayShades->getProgramId());
@@ -900,17 +506,8 @@ int main()
 	}
 
 	delete mlpObject;
-	delete resizeTopShades;
-	delete resizeShades;
-	delete convShades;
-	delete convBackShades;
-	delete convTopShades;
-	delete poolingShades;
-	delete poolingTopShades;
-	delete poolToConvTopShades;
-	delete poolToConvShades;
-	delete convBackTopShades;
 	delete displayShades;
+	delete convolutionFirstShades;
 	delete scene;
 	delete quad, quadInverted;
 	delete digitSet;
